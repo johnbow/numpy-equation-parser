@@ -4,7 +4,7 @@ from typing import Union, List, Callable, Tuple, Dict, Optional, Any
 import numpy as np
 
 
-max_repitions = 1_000_000
+MAX_REPITIONS = 1_000_000
 
 
 def kth_root(k: float, x: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
@@ -32,7 +32,7 @@ def sum_function(eqlist: "Vector") -> Any:
         values.append(e.value)
         k += 1
         i += 1
-        if i > max_repitions:
+        if i > MAX_REPITIONS:
             print("Exceeded max repitions.")
             break
     return np.sum(values, axis=0)
@@ -53,7 +53,7 @@ def prod_function(eqlist: "Vector") -> Any:
         values.append(e.value)
         k += 1
         i += 1
-        if i > max_repitions:
+        if i > MAX_REPITIONS:
             print("Exceeded max repitions.")
             break
     return np.prod(values, axis=0)
@@ -135,7 +135,6 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
     # vector functions
     "cross": (2, 500, np.cross),
     "dot": (2, 500, np.dot),
-    # special functions
     "max": (1, 600, max),
     "min": (1, 600, min),
 }
@@ -202,6 +201,16 @@ def _list_precs(eqstr: str) -> List[Tuple[str, int, int]]:
     return precs
 
 
+def as_equation(value: Union[float, list, np.ndarray], var: dict = None, params: dict = None) -> "Equation":
+    if isinstance(value, (float, int)):
+        return Number(value, var=var, params=params)
+    elif isinstance(value, np.ndarray):
+        return Vector(value, var=var, params=params)
+    elif isinstance(value, list):
+        return Vector(np.array(value), var=var, params=params)
+    raise ValueError(f"Type {str(type(value))} can not be converted to an equation.")
+
+
 class EqParser:
     standard_options = {
         "std_name": "f",
@@ -223,19 +232,10 @@ class EqParser:
         self.params[name] = np.nan
         if isinstance(value, Equation):
             self.params[name] = value
-        else:
-            self.params[name] = self.as_equation(value, name, var)
-
-    def as_equation(self, value: Union[str, float, list, np.ndarray], name: str = "", var: dict = None) -> "Equation":
-        if isinstance(value, float):
-            return Number(value, var=var, params=self.params)
-        elif isinstance(value, list):
-            return Vector(np.array(value), var=var, params=self.params)
-        elif isinstance(value, np.ndarray):
-            return Vector(value, var=var, params=self.params)
         elif isinstance(value, str):
             return self.parse(value, name, var=var)
-        raise ValueError(f"Type {str(type(value))} can not be converted to an equation.")
+        else:
+            self.params[name] = as_equation(value, var, self.params)
 
     def parse(self, eqstr: str, name: str = "", var: dict = None) -> "Equation":
         name = name if name else self.standard_name()
@@ -256,7 +256,7 @@ class EqParser:
                     right: int,
                     var: dict) -> "Equation":
         # find lowest precedence operator between left and right
-        op_list = next(filter(lambda op: left <= op[1] < right, prec_list), None)
+        op_list = next(filter(lambda o: left <= o[1] < right, prec_list), None)
         if not op_list:
             # this is an end node
             content = re.sub(r"[()\[\] ]", "", eqstr[left:right])
@@ -267,14 +267,14 @@ class EqParser:
             if content in self.params:
                 return Parameter(content, var=var, params=self.params)
             else:
-                var[content] = np.nan
+                var[content] = Number(np.nan)
                 return Variable(content, var=var, params=self.params)
         else:
             # this node is an operator
             prec_list.remove(op_list)
             opstr, index, prec = op_list
             if opstr == ";" or opstr == "|":  # check for Vector operators
-                vector_ops = list(filter(lambda op: left <= op[1] < right and prec == op[2], prec_list))
+                vector_ops = list(filter(lambda o: left <= o[1] < right and prec == o[2], prec_list))
                 for op in vector_ops:
                     prec_list.remove(op)
                 vector_ops = [op_list] + vector_ops
@@ -319,6 +319,7 @@ class Equation:
         self.var = var
         self.params = params
         self.eqname = ""
+        self.opstr = ""
         self.is_primitive = False   # True if value accesses own node's memory directly
         self.is_assignable = False  # True if value accesses another node's value
         self.__iter__ = self.args.__iter__
@@ -333,16 +334,22 @@ class Equation:
     def value(self, v: Union[float, np.ndarray]):
         self._value = v
 
-    def set_var(self, name: str, value: Union["Equation", float, np.ndarray]):
+    def set_var(self, name: str, value: Union["Equation", float, np.ndarray]) -> None:
         if isinstance(value, Equation):
             self.var[name] = value
+        else:
+            self.var[name] = as_equation(value, self.var, self.params)
 
-    def __call__(self, *args: Union[float, np.ndarray], **kwargs) -> Union[float, np.ndarray]:
+    def update_vars(self, vardict: dict) -> None:
+        for k, v in vardict.items():
+            self.set_var(k, v)
+
+    def __call__(self, *args: Union["Equation", float, np.ndarray], **kwargs) -> Union[float, np.ndarray]:
         if args:
             for k, v in zip(sorted(self.var.keys()), args):
-                self.var[k] = v
+                self.set_var(k, v)
         if kwargs:
-            self.var.update(kwargs)
+            self.update_vars(kwargs)
         return self.value
 
     def __iadd__(self, other):
@@ -479,5 +486,6 @@ class Vector(Equation):
 
 if __name__ == "__main__":
     parser = EqParser()
-    f = parser.parse("sum(x=1;inf; 1/x^2)")
-    print(f())
+    f = parser.parse("3*x")
+    g = parser.parse("x^2")
+    h = f(g)
