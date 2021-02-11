@@ -3,6 +3,18 @@ from typing import Union, List, Callable, Tuple, Dict, Optional, Any
 
 import numpy as np
 
+name_count = 0
+name_prefix = "f"
+try:
+    from varname import varname
+except ImportError:
+    def standard_name():
+        global name_count
+        name = name_prefix + str(name_count)
+        name_count += 1
+        return name
+    varname = standard_name
+
 
 MAX_REPITIONS = 1_000_000
 
@@ -173,7 +185,8 @@ def _norm_eq(eqstr: str) -> str:
     return eqstr
 
 
-def _list_precs(eqstr: str) -> List[Tuple[str, int, int]]:
+def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]]:
+    equations = equations if equations else {}
     precs = []  # (opstr, index, prec)
     level = 0
     opstr = ""  # can also be variable or parameter
@@ -197,7 +210,6 @@ def _list_precs(eqstr: str) -> List[Tuple[str, int, int]]:
             index = i - len(opstr) + 1
             precs.append((opstr, index, prec))
             opstr = ""
-
     return precs
 
 
@@ -212,10 +224,7 @@ def as_equation(value: Union[float, list, np.ndarray], var: dict = None, params:
 
 
 class EqParser:
-    standard_options = {
-        "std_name": "f",
-        "init_name_count": 0
-    }
+    standard_options = {}
 
     def __init__(self, options: dict = None):
         self.options = options if options else {}
@@ -226,7 +235,6 @@ class EqParser:
             "pi": Number(np.pi),
             "inf": Number(np.inf)
         }
-        self.name_counter = self.options["init_name_count"]
 
     def set_param(self, name: str, value: Union[str, float, list, np.ndarray, "Equation"], var: dict = None):
         self.params[name] = np.nan
@@ -238,7 +246,8 @@ class EqParser:
             self.params[name] = as_equation(value, var, self.params)
 
     def parse(self, eqstr: str, name: str = "", var: dict = None) -> "Equation":
-        name = name if name else self.standard_name()
+        while not name or name in self.equations:
+            name = varname()
         var = var if var else {}
         eqstr = _norm_eq(eqstr)
         prec_list = _list_precs(eqstr)
@@ -264,7 +273,10 @@ class EqParser:
                 content = "0"
             if content.replace('.', '', 1).isdigit():
                 return Number(float(content), var=var, params=self.params)
-            if content in self.params:
+            if content in self.equations:
+                var[content] = self.equations[content]
+                return Variable(content, var=var, params=self.params)
+            elif content in self.params:
                 return Parameter(content, var=var, params=self.params)
             else:
                 var[content] = Number(np.nan)
@@ -296,11 +308,6 @@ class EqParser:
                 return Operator(opstr, left, right, var=var, params=self.params)
             else:
                 raise ValueError("Only operators with 1 or 2 arguments are allowed.")
-
-    def standard_name(self) -> str:
-        name = self.options["std_name"] + str(self.name_counter)
-        self.name_counter += 1
-        return name
 
     def __getitem__(self, item):
         return self.equations[item]
@@ -512,14 +519,14 @@ class Vector(Equation):
 
 
 if __name__ == "__main__":
-    # Hier der Test-Code
     parser = EqParser()
-    f = parser.parse("3+x")
-    print(parser["f0"])
+    f = parser.parse("2*x")
+    g = parser.parse("3*f")
+    print(g)
 
 
+# TODO: fix bug with f(x) = 3(x) and enable use of '3*f(x+4)'
 # TODO: write README
 # TODO: write docs
 # TODO: implement magic methods
-# TODO: make equations available in parse()
 # TODO: implement visualizer in other file
