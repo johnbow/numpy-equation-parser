@@ -334,7 +334,7 @@ class Equation:
     def value(self, v: Union[float, np.ndarray]):
         self._value = v
 
-    def set_var(self, name: str, value: Union["Equation", float, np.ndarray]) -> None:
+    def set_var(self, name: str, value: Union[float, np.ndarray, "Equation"]) -> None:
         if isinstance(value, Equation):
             self.var[name] = value
         else:
@@ -344,12 +344,14 @@ class Equation:
         for k, v in vardict.items():
             self.set_var(k, v)
 
-    def __call__(self, *args: Union["Equation", float, np.ndarray], **kwargs) -> Union[float, np.ndarray]:
+    def __call__(self, *args: Union[float, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
         if args:
             for k, v in zip(sorted(self.var.keys()), args):
                 self.set_var(k, v)
         if kwargs:
             self.update_vars(kwargs)
+        elif len(args) == 1 and isinstance(args[0], Equation):
+            return self
         return self.value
 
     def __iadd__(self, other):
@@ -423,6 +425,11 @@ class Parameter(Equation):
     def value(self, v: Union[float, np.ndarray]):
         self.params[self.name].value = v
 
+    def __str__(self):
+        if not self.var[self.name].is_primitive:
+            return f"({str(self.var[self.name])})"
+        return self.name
+
     def __repr__(self):
         return f"Operator(name='{self.name}')"
 
@@ -440,6 +447,11 @@ class Variable(Equation):
     @value.setter
     def value(self, v: Union[float, np.ndarray, "Equation"]):
         self.set_var(self.name, v)
+
+    def __str__(self):
+        if not self.var[self.name].is_primitive:
+            return f"({str(self.var[self.name])})"
+        return self.name
 
     def __repr__(self):
         return f"Variable(name='{self.name}', value={self.value})"
@@ -487,5 +499,5 @@ class Vector(Equation):
 if __name__ == "__main__":
     parser = EqParser()
     f = parser.parse("3*x")
-    g = parser.parse("x^2")
-    h = f(g)
+    g = parser.parse("x+2")
+    print(f(g))
