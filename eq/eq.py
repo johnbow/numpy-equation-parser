@@ -302,6 +302,9 @@ class EqParser:
         self.name_counter += 1
         return name
 
+    def __getitem__(self, item):
+        return self.equations[item]
+
 
 class Equation:
 
@@ -322,6 +325,7 @@ class Equation:
         self.opstr = ""
         self.is_primitive = False   # True if value accesses own node's memory directly
         self.is_assignable = False  # True if value accesses another node's value
+        # TODO: correct assignments below; e.g. contains has to be implemented recursively
         self.__iter__ = self.args.__iter__
         self.__contains__ = self.args.__contains__
         self.__len__ = self.args.__len__
@@ -354,13 +358,24 @@ class Equation:
             return self
         return self.value
 
+    def __getitem__(self, item: Union[tuple, slice]) -> np.ndarray:
+        """
+        Inputs an array into the function and returns the calculated value.
+
+        The input can be either a slice or a tuple of values. If it is a slice,
+        the array will be made using np.arange, if it is a list of values, the values
+        are going to be wrapped into an array. Consider that this works only for
+        equations with one variables. For more variables, each array should be passed
+        to __call__.
+        """
+        if isinstance(item, tuple):
+            return self.__call__(np.array(item))
+        else:
+            return self.__call__(np.arange(item.start, item.stop, item.step))
+
     def __iadd__(self, other):
         self.value += other
         return self
-
-    def __getitem__(self, item):
-        # use for slicing
-        pass
 
     def __str__(self):
         return self.name
@@ -497,7 +512,14 @@ class Vector(Equation):
 
 
 if __name__ == "__main__":
+    # Hier der Test-Code
     parser = EqParser()
-    f = parser.parse("3*x")
-    g = parser.parse("x+2")
-    print(f(g))
+    f = parser.parse("3+x")
+    print(parser["f0"])
+
+
+# TODO: write README
+# TODO: write docs
+# TODO: implement magic methods
+# TODO: make equations available in parse()
+# TODO: implement visualizer in other file
