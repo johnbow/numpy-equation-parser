@@ -6,7 +6,6 @@ import numpy as np
 name_count = 0
 name_prefix = "f"
 
-
 def standard_name():
     global name_count
     name = name_prefix + str(name_count)
@@ -17,6 +16,8 @@ def standard_name():
 try:
     from varname import varname
 except ImportError:
+    import sys
+    print("Install 'varname' for better handling of compound functions.", file=sys.stderr)
     varname = standard_name
 
 
@@ -209,8 +210,9 @@ def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]
             if opstr not in operators and opstr not in equations:
                 opstr = ""
                 continue
-            elif opstr in equations and next_letter == "(":
-                precs.append((opstr, i - len(opstr) + 1, 600))
+            elif opstr in equations:
+                if next_letter == "(":
+                    precs.append((opstr, i - len(opstr) + 1, 600))
             else:
                 oplist = operators[opstr]
                 prec = oplist[PREC] + level * BRACKET_PREC
@@ -282,9 +284,11 @@ class EqParser:
                 content = "0"
             if content.replace('.', '', 1).isdigit():
                 return Number(float(content), var=var, params=self.params)
+
             if content in self.equations:
-                var[content] = self.equations[content]
-                return Variable(content, var=var, params=self.params)
+                var.update(self.equations[content].var)
+                self.equations[content].change_vars(var)
+                return Variable(content, var=var, params=self.params, eqref=self.equations[content])
             elif content in self.params:
                 return Parameter(content, var=var, params=self.params)
             else:
@@ -360,22 +364,24 @@ class Equation:
     def value(self, v: Union[float, np.ndarray]):
         self._value = v
 
+    def change_vars(self, new_vars: dict):
+        self.var = new_vars
+        for arg in self.args:
+            arg.change_vars(new_vars)
+
     def set_var(self, name: str, value: Union[float, np.ndarray, "Equation"]) -> None:
         if isinstance(value, Equation):
             self.var[name] = value
         else:
             self.var[name] = as_equation(value, self.var, self.params)
 
-    def update_vars(self, vardict: dict) -> None:
-        for k, v in vardict.items():
-            self.set_var(k, v)
-
     def __call__(self, *args: Union[float, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
         if args:
             for k, v in zip(sorted(self.var.keys()), args):
                 self.set_var(k, v)
         if kwargs:
-            self.update_vars(kwargs)
+            for k, v in kwargs.items():
+                self.set_var(k, v)
         elif len(args) == 1 and isinstance(args[0], Equation):
             return self
         return self.value
@@ -463,8 +469,6 @@ class Parameter(Equation):
         self.params[self.name].value = v
 
     def __str__(self):
-        if not self.var[self.name].is_primitive:
-            return f"({str(self.var[self.name])})"
         return self.name
 
     def __repr__(self):
@@ -480,18 +484,17 @@ class Variable(Equation):
 
     @property
     def value(self) -> Union[float, np.ndarray]:
-        try:
+        if self._value is None:
             return self.var[self.name].value
-        except KeyError:
-            return self._value.value
+        return self._value.value
 
     @value.setter
     def value(self, v: Union[float, np.ndarray, "Equation"]):
         self.set_var(self.name, v)
 
     def __str__(self):
-        if not self.var[self.name].is_primitive:
-            return f"({str(self.var[self.name])})"
+        if self._value is not None:
+            return f"({str(self._value)})"
         return self.name
 
     def __repr__(self):
@@ -510,12 +513,18 @@ class Number(Equation):
 
 class Vector(Equation):
 
-    def __init__(self, *args: Union[np.ndarray, "Equation"], var: dict = None, params: dict = None):
+    def __init__(self,
+                 vec_or_item1: Union[np.ndarray, "Equation"],
+                 *args: Union[np.ndarray, "Equation"],
+                 var: dict = None,
+                 params: dict = None):
         super().__init__(*args, var=var, params=params)
-        self.is_primitive = len(self.args) == 1
+        self.is_primitive = bool(args)
         if self.is_primitive:
-            self._value = lambda: self.args[0]
+            self.vec = vec_or_item1
+            self._value = lambda: self.vec
         else:
+            self.args = (vec_or_item1,) + self.args
             self._value = lambda: np.array([arg.value for arg in self.args])
 
     @property
@@ -524,26 +533,29 @@ class Vector(Equation):
 
     @value.setter
     def value(self, v: np.ndarray):
-        self.args = tuple(v)
+        self.vec = tuple(v)
         self.is_primitive = True
 
     def __str__(self):
         if self.is_primitive:
-            return f"[{'; '.join(map(str, self.args[0]))}]"
+            return f"[{'; '.join(map(str, self.vec))}]"
         else:
             return f"[{'; '.join(map(str, self.args))}]"
 
     def __repr__(self):
-        return f"EquationList({'; '.join(map(repr, self.args))})"
+        return f"Vector({'; '.join(map(repr, self.args))})"
 
 
 if __name__ == "__main__":
     # import timeit
     # print(timeit.timeit(calc, number=100))
     parser = EqParser()
-    f = parser.parse("2")
-    g = parser.parse("f(x^2)")
+    f = parser.parse("x/y")
+    g = parser.parse("x^2")
+    h = parser.parse("f(x=g)")   # x^2/y
+    print(h(3, 2))
 
+# TODO: implement f(x)=x/y; g(x)=x^2; h(x)=f(x=g) -> h(3, 2)=2.25
 # TODO: write README
 # TODO: write docs
 # TODO: implement magic methods
