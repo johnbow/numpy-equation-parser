@@ -100,6 +100,25 @@ def assign(node1: "Equation", node2: "Equation") -> Optional["Equation"]:
     left.value = right.value
     return left
 
+def call_equation(inner: "Equation", equation: "Equation") -> Union[float, np.ndarray, "Equation"]:
+    args = []
+
+    def set_vars(_inner: "Equation"):
+        inner_value = _inner.value
+        if isinstance(inner_value, Variable):
+            equation.set_var(inner_value.name, inner_value.value)
+        elif isinstance(_inner, Vector) and not _inner.is_primitive:
+            for node in _inner.args:
+                set_vars(node)
+        else:
+            args.append(inner)
+    if isinstance(inner, Equation):
+        set_vars(inner)
+    else:
+        args.append(inner)
+    equation.set_vars(*args)
+    return equation.value
+
 
 ARGS, PREC, FUNC = 0, 1, 2
 BRACKET_PREC = 1000
@@ -108,6 +127,7 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
     # parser operators
     "|": (2, 1, merge_equations),
     ";": (2, 1, merge_equations),
+    "call": (1, 600, call_equation),
     # logic operators
     "or": (2, 40, np.logical_or),
     "and": (2, 50, np.logical_and),
@@ -212,7 +232,9 @@ def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]
                 continue
             elif opstr in equations:
                 if next_letter == "(":
-                    precs.append((opstr, i - len(opstr) + 1, 600))
+                    prec = 600 + level * BRACKET_PREC
+                    index = i - len(opstr) + 1
+                    precs.append((opstr, index, prec))
             else:
                 oplist = operators[opstr]
                 prec = oplist[PREC] + level * BRACKET_PREC
@@ -308,10 +330,9 @@ class EqParser:
                                 for i, j in zip(indices, indices[1:])]
                 return merge_equations(vector_items, var=var, params=self.params)
 
-            elif opstr in self.equations:
+            if opstr in self.equations:
                 right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
-                self.equations[opstr].__call__(right_op)
-                return Variable(opstr, var=var, params=self.params, eqref=self.equations[opstr])
+                return Operator("call", right_op, var=var, params=self.params, equation=self.equations[opstr])
 
             num_args = operators[opstr][ARGS]
             if num_args == 1:
@@ -340,8 +361,10 @@ class Equation:
                  name: str = "",
                  var: dict = None,
                  params: dict = None,
-                 value: Union[float, np.ndarray] = np.nan):
+                 value: Union[float, np.ndarray] = np.nan,
+                 **kwargs):
         self.args = args
+        self.kwargs = kwargs
         self.name = name
         self._value = value
         self.origstr = eqstr
@@ -351,10 +374,6 @@ class Equation:
         self.opstr = ""
         self.is_primitive = False   # True if value accesses own node's memory directly
         self.is_assignable = False  # True if value accesses another node's value
-        # TODO: correct assignments below; e.g. contains has to be implemented recursively
-        self.__iter__ = self.args.__iter__
-        self.__contains__ = self.args.__contains__
-        self.__len__ = self.args.__len__
 
     @property
     def value(self) -> Union[float, np.ndarray]:
@@ -375,14 +394,16 @@ class Equation:
         else:
             self.var[name] = as_equation(value, self.var, self.params)
 
-    def __call__(self, *args: Union[float, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
-        if args:
-            for k, v in zip(sorted(self.var.keys()), args):
-                self.set_var(k, v)
+    def set_vars(self, *args: Union[float, np.ndarray, "Equation"], **kwargs):
+        for k, v in zip(sorted(self.var.keys()), args):
+            self.set_var(k, v)
         if kwargs:
             for k, v in kwargs.items():
                 self.set_var(k, v)
-        elif len(args) == 1 and isinstance(args[0], Equation):
+
+    def __call__(self, *args: Union[float, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
+        self.set_vars(*args, **kwargs)
+        if len(args) == 1 and isinstance(args[0], Equation):
             return self
         return self.value
 
@@ -414,18 +435,22 @@ class Equation:
 
 class Operator(Equation):
 
-    def __init__(self, opstr: str, *args, var: dict = None, params: dict = None):
-        super().__init__(*args, name=opstr, var=var, params=params)
+    def __init__(self, opstr: str, *args, var: dict = None, params: dict = None, **kwargs):
+        super().__init__(*args, name=opstr, var=var, params=params, **kwargs)
         self.opstr = opstr
         self.func = operators[opstr][FUNC]
 
     @property
     def value(self) -> Union[float, np.ndarray]:
-        return self.func(*[item.value for item in self.args])
+        return self.func(*[item.value for item in self.args], **self.kwargs)
 
     def __str__(self):
+        if self.opstr == "call":
+            name = self.kwargs['equation'].eqname
+            name = name if name else self.opstr
+            return f"{name}({str(self.args[0])})"
         if len(self.args) == 1:
-            return f"{self.opstr}( {str(self.args[0])} )"
+            return f"{self.opstr}({str(self.args[0])})"
         else:
             left = str(self.args[0])
             if type(self.args[0]) == Operator and \
@@ -550,12 +575,11 @@ if __name__ == "__main__":
     # import timeit
     # print(timeit.timeit(calc, number=100))
     parser = EqParser()
-    f = parser.parse("x/y")
-    g = parser.parse("x^2")
-    h = parser.parse("f(x=g)")   # x^2/y
-    print(h(3, 2))
+    f = parser.parse("y/x")
+    h = parser.parse("f(x=1; y=2)")
+    print(h())
 
-# TODO: implement f(x)=x/y; g(x)=x^2; h(x)=f(x=g) -> h(3, 2)=2.25
+# TODO: implement correct call behaviour on vectors, e.g. f(x=1; y=2)
 # TODO: write README
 # TODO: write docs
 # TODO: implement magic methods
