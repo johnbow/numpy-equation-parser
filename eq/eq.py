@@ -307,7 +307,7 @@ class EqParser:
             elif opstr in self.equations:
                 right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
                 self.equations[opstr].__call__(right_op)
-                return self.equations[opstr]
+                return Variable(opstr, var=var, params=self.params, eqref=self.equations[opstr])
 
             num_args = operators[opstr][ARGS]
             if num_args == 1:
@@ -473,13 +473,17 @@ class Parameter(Equation):
 
 class Variable(Equation):
 
-    def __init__(self, name: str, var: dict, params: dict = None):
+    def __init__(self, name: str, var: dict, params: dict = None, eqref: "Equation" = None):
         super().__init__(name=name, var=var, params=params)
         self.is_assignable = True
+        self._value = eqref
 
     @property
     def value(self) -> Union[float, np.ndarray]:
-        return self.var[self.name].value
+        try:
+            return self.var[self.name].value
+        except KeyError:
+            return self._value.value
 
     @value.setter
     def value(self, v: Union[float, np.ndarray, "Equation"]):
@@ -534,11 +538,11 @@ class Vector(Equation):
 
 
 if __name__ == "__main__":
+    # import timeit
+    # print(timeit.timeit(calc, number=100))
     parser = EqParser()
-    f = parser.parse("2*x")
+    f = parser.parse("2")
     g = parser.parse("f(x^2)")
-    print(g)
-
 
 # TODO: write README
 # TODO: write docs
