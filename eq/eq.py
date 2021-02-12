@@ -5,14 +5,18 @@ import numpy as np
 
 name_count = 0
 name_prefix = "f"
+
+
+def standard_name():
+    global name_count
+    name = name_prefix + str(name_count)
+    name_count += 1
+    return name
+
+
 try:
     from varname import varname
 except ImportError:
-    def standard_name():
-        global name_count
-        name = name_prefix + str(name_count)
-        name_count += 1
-        return name
     varname = standard_name
 
 
@@ -179,7 +183,7 @@ def _norm_eq(eqstr: str) -> str:
     i = 0
     while i < len(eqstr) - 1:
         this, nxt = eqstr[i:i + 2]
-        if this.isdigit() and nxt.isalpha():
+        if (this.isdigit() and nxt.isalpha()) or (this.isdigit() and nxt == "("):
             eqstr = eqstr[:i + 1] + "*" + eqstr[i + 1:]
         i += 1
     return eqstr
@@ -202,13 +206,16 @@ def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]
             opstr += letter
         # if opstr is operator
         if opstr and (not next_letter or not next_letter.isalpha() or not opstr.isalpha()):
-            if opstr not in operators:
+            if opstr not in operators and opstr not in equations:
                 opstr = ""
                 continue
-            oplist = operators[opstr]
-            prec = oplist[PREC] + level * BRACKET_PREC
-            index = i - len(opstr) + 1
-            precs.append((opstr, index, prec))
+            elif opstr in equations and next_letter == "(":
+                precs.append((opstr, i - len(opstr) + 1, 600))
+            else:
+                oplist = operators[opstr]
+                prec = oplist[PREC] + level * BRACKET_PREC
+                index = i - len(opstr) + 1
+                precs.append((opstr, index, prec))
             opstr = ""
     return precs
 
@@ -246,11 +253,13 @@ class EqParser:
             self.params[name] = as_equation(value, var, self.params)
 
     def parse(self, eqstr: str, name: str = "", var: dict = None) -> "Equation":
-        while not name or name in self.equations:
+        if not name:
             name = varname()
+        while not name or name in self.equations:
+            name = standard_name()
         var = var if var else {}
         eqstr = _norm_eq(eqstr)
-        prec_list = _list_precs(eqstr)
+        prec_list = _list_precs(eqstr, self.equations)
         # sort after precedence, then index
         prec_list.sort(key=lambda item: (item[2], -item[1]))
         root = self._parse_node(eqstr, prec_list, 0, len(eqstr), var)
@@ -294,18 +303,24 @@ class EqParser:
                 vector_items = [self._parse_node(eqstr, prec_list, i+1, j, var)
                                 for i, j in zip(indices, indices[1:])]
                 return merge_equations(vector_items, var=var, params=self.params)
+
+            elif opstr in self.equations:
+                right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
+                self.equations[opstr].__call__(right_op)
+                return self.equations[opstr]
+
             num_args = operators[opstr][ARGS]
             if num_args == 1:
-                right = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
+                right_op = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
                 if opstr in node_operators:
-                    return NodeOperator(opstr, right, var=var, params=self.params)
-                return Operator(opstr, right, var=var, params=self.params)
+                    return NodeOperator(opstr, right_op, var=var, params=self.params)
+                return Operator(opstr, right_op, var=var, params=self.params)
             elif num_args == 2:
-                left = self._parse_node(eqstr, prec_list, left, index, var)
-                right = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
+                left_op = self._parse_node(eqstr, prec_list, left, index, var)
+                right_op = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
                 if opstr in node_operators:
-                    return NodeOperator(opstr, left, right, var=var, params=self.params)
-                return Operator(opstr, left, right, var=var, params=self.params)
+                    return NodeOperator(opstr, left_op, right_op, var=var, params=self.params)
+                return Operator(opstr, left_op, right_op, var=var, params=self.params)
             else:
                 raise ValueError("Only operators with 1 or 2 arguments are allowed.")
 
@@ -521,11 +536,10 @@ class Vector(Equation):
 if __name__ == "__main__":
     parser = EqParser()
     f = parser.parse("2*x")
-    g = parser.parse("3*f")
+    g = parser.parse("f(x^2)")
     print(g)
 
 
-# TODO: fix bug with f(x) = 3(x) and enable use of '3*f(x+4)'
 # TODO: write README
 # TODO: write docs
 # TODO: implement magic methods
