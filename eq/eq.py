@@ -112,6 +112,7 @@ def call_equation(inner: "Equation", equation: "Equation") -> Union[float, np.nd
                 set_vars(node)
         else:
             args.append(inner)
+
     if isinstance(inner, Equation):
         set_vars(inner)
     else:
@@ -127,7 +128,6 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
     # parser operators
     "|": (2, 1, merge_equations),
     ";": (2, 1, merge_equations),
-    "call": (1, 600, call_equation),
     # logic operators
     "or": (2, 40, np.logical_or),
     "and": (2, 50, np.logical_and),
@@ -178,6 +178,7 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
 
 node_operators: Dict[str, Tuple[int, int, Callable]] = {
     "=": (2, 2, assign),
+    "call": (1, 600, call_equation),
     "sum": (1, 600, sum_function),
     "prod": (1, 600, prod_function),
 }
@@ -332,7 +333,7 @@ class EqParser:
 
             if opstr in self.equations:
                 right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
-                return Operator("call", right_op, var=var, params=self.params, equation=self.equations[opstr])
+                return NodeOperator("call", right_op, var=var, params=self.params, equation=self.equations[opstr])
 
             num_args = operators[opstr][ARGS]
             if num_args == 1:
@@ -476,7 +477,7 @@ class NodeOperator(Operator):
 
     @property
     def value(self) -> Union[float, np.ndarray, "Equation"]:
-        return self.func(*self.args)
+        return self.func(*self.args, **self.kwargs)
 
 
 class Parameter(Equation):
@@ -544,7 +545,7 @@ class Vector(Equation):
                  var: dict = None,
                  params: dict = None):
         super().__init__(*args, var=var, params=params)
-        self.is_primitive = bool(args)
+        self.is_primitive = len(args) == 0
         if self.is_primitive:
             self.vec = vec_or_item1
             self._value = lambda: self.vec
@@ -575,11 +576,11 @@ if __name__ == "__main__":
     # import timeit
     # print(timeit.timeit(calc, number=100))
     parser = EqParser()
-    f = parser.parse("y/x")
-    h = parser.parse("f(x=1; y=2)")
-    print(h())
+    f = parser.parse("3/x")
+    g = parser.parse("4+x")
+    h = parser.parse("f(g)")
+    print(h(5))
 
-# TODO: implement correct call behaviour on vectors, e.g. f(x=1; y=2)
 # TODO: write README
 # TODO: write docs
 # TODO: implement magic methods
