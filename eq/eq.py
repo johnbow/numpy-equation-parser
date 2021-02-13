@@ -37,12 +37,12 @@ def logbase(base: float, x: Union[float, np.ndarray]) -> Union[float, np.ndarray
 def sum_function(eqlist: "Vector") -> Any:
     if eqlist.is_primitive:
         return np.sum(eqlist.value)
-    if eqlist.args[0].name != "=":
-        return np.sum(arg.value for arg in eqlist.args)
-    if len(eqlist.args) != 3:
-        raise ValueError(f"sum function expects 3 arguments. {len(eqlist.args)} given.")
+    if eqlist.nodes[0].name != "=":
+        return np.sum(node.value for node in eqlist.nodes)
+    if len(eqlist.nodes) != 3:
+        raise ValueError(f"sum function expects 3 arguments. {len(eqlist.nodes)} given.")
     values = []
-    k, upper, e = eqlist.args
+    k, upper, e = eqlist.nodes
     k = k.value
     i = 0
     while k.value <= upper.value:
@@ -58,12 +58,12 @@ def sum_function(eqlist: "Vector") -> Any:
 def prod_function(eqlist: "Vector") -> Any:
     if eqlist.is_primitive:
         return np.prod(eqlist.value)
-    if eqlist.args[0].name != "=":
-        return np.prod(arg.value for arg in eqlist.args)
-    if len(eqlist.args) != 3:
-        raise ValueError(f"prod function expects 3 arguments. {len(eqlist.args)} given.")
+    if eqlist.nodes[0].name != "=":
+        return np.prod(node.value for node in eqlist.nodes)
+    if len(eqlist.nodes) != 3:
+        raise ValueError(f"prod function expects 3 arguments. {len(eqlist.nodes)} given.")
     values = []
-    k, upper, e = eqlist.args
+    k, upper, e = eqlist.nodes
     k = k.value
     i = 0
     while k.value <= upper.value:
@@ -101,27 +101,27 @@ def assign(node1: "Equation", node2: "Equation") -> Optional["Equation"]:
     return left
 
 def call_equation(inner: "Equation", equation: "Equation") -> Union[float, np.ndarray, "Equation"]:
-    args = []
+    variables = []
 
     def set_vars(_inner: "Equation"):
         inner_value = _inner.value
         if isinstance(inner_value, Variable):
             equation.set_var(inner_value.name, inner_value.value)
         elif isinstance(_inner, Vector) and not _inner.is_primitive:
-            for node in _inner.args:
+            for node in _inner.nodes:
                 set_vars(node)
         else:
-            args.append(inner)
+            variables.append(inner)
 
     if isinstance(inner, Equation):
         set_vars(inner)
     else:
-        args.append(inner)
-    equation.set_vars(*args)
+        variables.append(inner)
+    equation.set_vars(*variables)
     return equation.value
 
 
-ARGS, PREC, FUNC = 0, 1, 2
+NODES, PREC, FUNC = 0, 1, 2
 BRACKET_PREC = 1000
 # abbrev, args, prec, func
 operators: Dict[str, Tuple[int, int, Callable]] = {
@@ -169,6 +169,7 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
     "round": (1, 600, np.rint),
     "floor": (1, 600, np.floor),
     "ceil": (1, 600, np.ceil),
+    "trunc": (1, 600, np.trunc),
     # vector functions
     "cross": (2, 500, np.cross),
     "dot": (2, 500, np.dot),
@@ -185,7 +186,7 @@ node_operators: Dict[str, Tuple[int, int, Callable]] = {
 operators.update(node_operators)
 
 
-def add_operator(opname: str, func: Callable, args: int, prec: int = -1, node_operator: bool = False):
+def add_operator(opname: str, func: Callable, nodes: int, prec: int = -1, node_operator: bool = False):
     """
     Adds 'opname' to the list of operators.
     """
@@ -194,10 +195,10 @@ def add_operator(opname: str, func: Callable, args: int, prec: int = -1, node_op
     elif not opname.isalpha():
         raise ValueError(f"Operator name should only contain letters.")
     if prec < 0:
-        prec = 500 + 100 * int(args == 2)
-    operators[opname] = (args, prec, func)
+        prec = 500 + 100 * int(nodes == 2)
+    operators[opname] = (nodes, prec, func)
     if node_operator:
-        node_operators[opname] = (args, prec, func)
+        node_operators[opname] = (nodes, prec, func)
 
 
 def _norm_eq(eqstr: str) -> str:
@@ -309,6 +310,7 @@ class EqParser:
                 return Number(float(content), var=var, params=self.params)
 
             if content in self.equations:
+                # merge var dicts
                 var.update(self.equations[content].var)
                 self.equations[content].change_vars(var)
                 return Variable(content, var=var, params=self.params, eqref=self.equations[content])
@@ -335,13 +337,13 @@ class EqParser:
                 right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
                 return NodeOperator("call", right_op, var=var, params=self.params, equation=self.equations[opstr])
 
-            num_args = operators[opstr][ARGS]
-            if num_args == 1:
+            number_of_nodes = operators[opstr][NODES]
+            if number_of_nodes == 1:
                 right_op = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
                 if opstr in node_operators:
                     return NodeOperator(opstr, right_op, var=var, params=self.params)
                 return Operator(opstr, right_op, var=var, params=self.params)
-            elif num_args == 2:
+            elif number_of_nodes == 2:
                 left_op = self._parse_node(eqstr, prec_list, left, index, var)
                 right_op = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
                 if opstr in node_operators:
@@ -357,14 +359,14 @@ class EqParser:
 class Equation:
 
     def __init__(self,
-                 *args: "Equation",
+                 *nodes: "Equation",
                  eqstr: str = "",
                  name: str = "",
                  var: dict = None,
                  params: dict = None,
                  value: Union[float, np.ndarray] = np.nan,
                  **kwargs):
-        self.args = args
+        self.nodes = nodes
         self.kwargs = kwargs
         self.name = name
         self._value = value
@@ -387,8 +389,12 @@ class Equation:
 
     def change_vars(self, new_vars: dict):
         self.var = new_vars
-        for arg in self.args:
-            arg.change_vars(new_vars)
+        for node in self.nodes:
+            node.change_vars(new_vars)
+
+    def merge_vars(self, other: "Equation"):
+        self.var.update(other.var)
+        other.change_vars(self.var)
 
     def set_var(self, name: str, value: Union[float, np.ndarray, "Equation"]) -> None:
         if isinstance(value, Equation):
@@ -424,9 +430,161 @@ class Equation:
         else:
             return self.__call__(np.arange(item.start, item.stop, item.step))
 
-    def __iadd__(self, other):
+    def __iadd__(self, other: Union[float, np.ndarray]):
         self.value += other
         return self
+
+    def __isub__(self, other: Union[float, np.ndarray]):
+        self.value -= other
+        return self
+
+    def __imul__(self, other: Union[float, np.ndarray]):
+        self.value *= other
+        return self
+
+    def __idiv__(self, other: Union[float, np.ndarray]):
+        self.value /= other
+        return self
+
+    def __itruediv__(self, other: Union[float, np.ndarray]):
+        self.value /= other
+        return self
+
+    def __ifloordiv__(self, other: Union[float, np.ndarray]):
+        self.value //= other
+        return self
+
+    def __imod__(self, other: Union[float, np.ndarray]):
+        self.value %= other
+        return self
+
+    def __ipow__(self, other: Union[float, np.ndarray]):
+        self.value **= other
+        return self
+
+    def __iand__(self, other: Union[float, np.ndarray]):
+        self.value &= other
+        return self
+
+    def __ior__(self, other: Union[float, np.ndarray]):
+        self.value |= other
+        return self
+
+    def __ixor__(self, other: Union[float, np.ndarray]):
+        self.value ^= other
+        return self
+
+    def __ilshift__(self, other: Union[float, np.ndarray]):
+        self.value <<= other
+        return self
+
+    def __irshift__(self, other: Union[float, np.ndarray]):
+        self.value >>= other
+        return self
+
+    def __add__(self, other: "Equation"):
+        self.merge_vars(other)
+        return Operator("+", self, other, var=self.var, params=self.params)
+
+    def __sub__(self, other: "Equation"):
+        self.merge_vars(other)
+        return Operator("-", self, other, var=self.var, params=self.params)
+
+    def __mul__(self, other: "Equation"):
+        self.merge_vars(other)
+        return Operator("*", self, other, var=self.var, params=self.params)
+
+    def __truediv__(self, other):
+        self.merge_vars(other)
+        return Operator("/", self, other, var=self.var, params=self.params)
+
+    def __floordiv__(self, other):
+        self.merge_vars(other)
+        op = Operator("/", self, other, var=self.var, params=self.params)
+        return Operator("floor", op, var=self.var, params=self.params)
+
+    def __mod__(self, other):
+        self.merge_vars(other)
+        return Operator("mod", self, other, var=self.var, params=self.params)
+
+    def __pow__(self, power, modulo=None):
+        self.merge_vars(power)
+        return Operator("^", self, power, var=self.var, params=self.params)
+
+    def __or__(self, other):
+        self.merge_vars(self, other)
+        return Operator("or", self, other, var=self.var, params=self.params)
+
+    def __xor__(self, other):
+        self.merge_vars(self, other)
+        return Operator("xor", self, other, var=self.var, params=self.params)
+
+    def __and__(self, other):
+        self.merge_vars(self, other)
+        return Operator("and", self, other, var=self.var, params=self.params)
+
+    def __floor__(self):
+        return Operator("floor", self, var=self.var, params=self.params)
+
+    def __ceil__(self):
+        return Operator("ceil", self, var=self.var, params=self.params)
+
+    def __trunc__(self):
+        return Operator("trunc", self, var=self.var, params=self.params)
+
+    def __abs__(self):
+        return Operator("abs", self, var=self.var, params=self.params)
+
+    def __pos__(self):
+        return self
+
+    def __neg__(self):
+        return Operator("neg", self, var=self.var, params=self.params)
+
+    def __invert__(self):
+        self.nodes = self.nodes[::-1]
+
+    def __round__(self):
+        return Operator("round", self, var=self.var, params=self.params)
+
+    def __lt__(self, other):
+        return self.value < other.value
+
+    def __le__(self, other):
+        return self.value <= other.value
+
+    def __eq__(self, other):
+        return self.value == other.value
+
+    def __ne__(self, other):
+        return self.value != other.value
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+    def __gt__(self, other):
+        return self.value > other.value
+
+    def __int__(self):
+        return int(self.value)
+
+    def __float__(self):
+        return float(self.value)
+
+    def __complex__(self):
+        return complex(self.value)
+
+    def __hex__(self):
+        return hex(self.value)
+
+    def __iter__(self):
+        return iter(self.nodes)
+
+    def __copy__(self):
+        pass
+
+    def __deepcopy__(self, memodict={}):
+        pass
 
     def __str__(self):
         return self.name
@@ -437,33 +595,38 @@ class Equation:
 
 class Operator(Equation):
 
-    def __init__(self, opstr: str, *args, var: dict = None, params: dict = None, **kwargs):
-        super().__init__(*args, name=opstr, var=var, params=params, **kwargs)
+    def __init__(self, opstr: str, *nodes, var: dict = None, params: dict = None, **kwargs):
+        super().__init__(*nodes, name=opstr, var=var, params=params, **kwargs)
         self.opstr = opstr
         self.func = operators[opstr][FUNC]
 
     @property
     def value(self) -> Union[float, np.ndarray]:
-        return self.func(*[item.value for item in self.args], **self.kwargs)
+        return self.func(*[item.value for item in self.nodes], **self.kwargs)
 
     def __str__(self):
         if self.opstr == "call":
             name = self.kwargs['equation'].eqname
             name = name if name else self.opstr
-            return f"{name}({str(self.args[0])})"
-        if len(self.args) == 1:
-            return f"{self.opstr}({str(self.args[0])})"
+            return f"{name}({str(self.nodes[0])})"
+        if len(self.nodes) == 1:
+            return f"{self.opstr}({str(self.nodes[0])})"
         else:
-            left_node = self.args[0] if not self.args[0].is_eqref else self.args[0]._value
-            if isinstance(left_node, Operator) and operators[left_node.opstr][PREC] < operators[self.opstr][PREC]:
+
+            left_node = self.nodes[0] if not self.nodes[0].is_eqref else self.nodes[0]._value
+            if self.opstr == "-" and isinstance(left_node, Number) and left_node.value == 0:
+                left = ""   # unary operator: 0-x -> -x
+            elif isinstance(left_node, Operator) and operators[left_node.opstr][PREC] < operators[self.opstr][PREC]:
                 left = "(" + str(left_node) + ")"
             else:
                 left = str(left_node)
-            right_node = self.args[1] if not self.args[1].is_eqref else self.args[1]._value
+
+            right_node = self.nodes[1] if not self.nodes[1].is_eqref else self.nodes[1]._value
             if isinstance(right_node, Operator) and operators[right_node.opstr][PREC] < operators[self.opstr][PREC]:
                 right = "(" + str(right_node) + ")"
             else:
                 right = str(right_node)
+
             return " ".join((left, self.opstr, right))
 
     def __repr__(self):
@@ -480,7 +643,7 @@ class NodeOperator(Operator):
 
     @property
     def value(self) -> Union[float, np.ndarray, "Equation"]:
-        return self.func(*self.args, **self.kwargs)
+        return self.func(*self.nodes, **self.kwargs)
 
 
 class Parameter(Equation):
@@ -545,17 +708,17 @@ class Vector(Equation):
 
     def __init__(self,
                  vec_or_item1: Union[np.ndarray, "Equation"],
-                 *args: Union[np.ndarray, "Equation"],
+                 *nodes: Union[np.ndarray, "Equation"],
                  var: dict = None,
                  params: dict = None):
-        super().__init__(*args, var=var, params=params)
-        self.is_primitive = len(args) == 0
+        super().__init__(*nodes, var=var, params=params)
+        self.is_primitive = len(nodes) == 0
         if self.is_primitive:
             self.vec = vec_or_item1
             self._value = lambda: self.vec
         else:
-            self.args = (vec_or_item1,) + self.args
-            self._value = lambda: np.array([arg.value for arg in self.args])
+            self.nodes = (vec_or_item1,) + self.nodes
+            self._value = lambda: np.array([node.value for node in self.nodes])
 
     @property
     def value(self) -> np.ndarray:
@@ -570,10 +733,10 @@ class Vector(Equation):
         if self.is_primitive:
             return f"[{'; '.join(map(str, self.vec))}]"
         else:
-            return f"[{'; '.join(map(str, self.args))}]"
+            return f"[{'; '.join(map(str, self.nodes))}]"
 
     def __repr__(self):
-        return f"Vector({'; '.join(map(repr, self.args))})"
+        return f"Vector({'; '.join(map(repr, self.nodes))})"
 
 
 if __name__ == "__main__":
@@ -581,13 +744,11 @@ if __name__ == "__main__":
     # print(timeit.timeit(calc, number=100))
     parser = EqParser()
     f = parser.parse("3/x")
-    g = parser.parse("4+x")
-    h = parser.parse("f(3*g)")
-    print(h)
+    g = parser.parse("x/3")
+    h = f * g
+    print(h[0:10])
 
-# TODO: correct printing behaviour of compound functions: e.g. f(g) produces unnecessary bracket
-# -> remove parantheses from variable and make Operator responsible for them
+# TODO: overwrite names after next assignment
 # TODO: write README
 # TODO: write docs
-# TODO: implement magic methods
 # TODO: implement visualizer in other file
