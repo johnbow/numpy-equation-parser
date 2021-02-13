@@ -3,6 +3,8 @@ from typing import Union, List, Callable, Tuple, Dict, Optional, Any
 
 import numpy as np
 
+np.seterr(all="ignore")
+
 name_count = 0
 name_prefix = "f"
 
@@ -246,8 +248,8 @@ def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]
     return precs
 
 
-def as_equation(value: Union[float, list, np.ndarray], var: dict = None, params: dict = None) -> "Equation":
-    if isinstance(value, (float, int)):
+def as_equation(value: Union[complex, list, np.ndarray], var: dict = None, params: dict = None) -> "Equation":
+    if isinstance(value, (float, int, complex)):
         return Number(value, var=var, params=params)
     elif isinstance(value, np.ndarray):
         return Vector(value, var=var, params=params)
@@ -266,10 +268,11 @@ class EqParser:
         self.params: Dict[str, "Equation"] = {
             "e": Number(np.e),
             "pi": Number(np.pi),
-            "inf": Number(np.inf)
+            "inf": Number(np.inf),
+            "i": Number(np.complex(0, 1))
         }
 
-    def set_param(self, name: str, value: Union[str, float, list, np.ndarray, "Equation"], var: dict = None):
+    def set_param(self, name: str, value: Union[str, complex, list, np.ndarray, "Equation"], var: dict = None):
         self.params[name] = np.nan
         if isinstance(value, Equation):
             self.params[name] = value
@@ -353,7 +356,10 @@ class EqParser:
                 raise ValueError("Only operators with 1 or 2 arguments are allowed.")
 
     def __getitem__(self, item):
-        return self.equations[item]
+        if item in self.equations:
+            return self.equations[item]
+        else:
+            return self.params[item]
 
 
 class Equation:
@@ -364,7 +370,7 @@ class Equation:
                  name: str = "",
                  var: dict = None,
                  params: dict = None,
-                 value: Union[float, np.ndarray] = np.nan,
+                 value: Union[complex, np.ndarray] = np.nan,
                  **kwargs):
         self.nodes = nodes
         self.kwargs = kwargs
@@ -380,11 +386,11 @@ class Equation:
         self.is_eqref = False       # True if value accesses contained equation as reference
 
     @property
-    def value(self) -> Union[float, np.ndarray]:
+    def value(self) -> Union[complex, np.ndarray]:
         return self._value
 
     @value.setter
-    def value(self, v: Union[float, np.ndarray]):
+    def value(self, v: Union[complex, np.ndarray]):
         self._value = v
 
     def change_vars(self, new_vars: dict):
@@ -396,20 +402,20 @@ class Equation:
         self.var.update(other.var)
         other.change_vars(self.var)
 
-    def set_var(self, name: str, value: Union[float, np.ndarray, "Equation"]) -> None:
+    def set_var(self, name: str, value: Union[complex, np.ndarray, "Equation"]) -> None:
         if isinstance(value, Equation):
             self.var[name] = value
         else:
             self.var[name] = as_equation(value, self.var, self.params)
 
-    def set_vars(self, *args: Union[float, np.ndarray, "Equation"], **kwargs):
+    def set_vars(self, *args: Union[complex, np.ndarray, "Equation"], **kwargs):
         for k, v in zip(sorted(self.var.keys()), args):
             self.set_var(k, v)
         if kwargs:
             for k, v in kwargs.items():
                 self.set_var(k, v)
 
-    def __call__(self, *args: Union[float, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
+    def __call__(self, *args: Union[complex, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
         self.set_vars(*args, **kwargs)
         if len(args) == 1 and isinstance(args[0], Equation):
             return self
@@ -494,33 +500,33 @@ class Equation:
         self.merge_vars(other)
         return Operator("*", self, other, var=self.var, params=self.params)
 
-    def __truediv__(self, other):
+    def __truediv__(self, other: "Equation"):
         self.merge_vars(other)
         return Operator("/", self, other, var=self.var, params=self.params)
 
-    def __floordiv__(self, other):
+    def __floordiv__(self, other: "Equation"):
         self.merge_vars(other)
         op = Operator("/", self, other, var=self.var, params=self.params)
         return Operator("floor", op, var=self.var, params=self.params)
 
-    def __mod__(self, other):
+    def __mod__(self, other: "Equation"):
         self.merge_vars(other)
         return Operator("mod", self, other, var=self.var, params=self.params)
 
-    def __pow__(self, power, modulo=None):
+    def __pow__(self, power: "Equation", modulo=None):
         self.merge_vars(power)
         return Operator("^", self, power, var=self.var, params=self.params)
 
-    def __or__(self, other):
-        self.merge_vars(self, other)
+    def __or__(self, other: "Equation"):
+        self.merge_vars(other)
         return Operator("or", self, other, var=self.var, params=self.params)
 
-    def __xor__(self, other):
-        self.merge_vars(self, other)
+    def __xor__(self, other: "Equation"):
+        self.merge_vars(other)
         return Operator("xor", self, other, var=self.var, params=self.params)
 
-    def __and__(self, other):
-        self.merge_vars(self, other)
+    def __and__(self, other: "Equation"):
+        self.merge_vars(other)
         return Operator("and", self, other, var=self.var, params=self.params)
 
     def __floor__(self):
@@ -547,22 +553,22 @@ class Equation:
     def __round__(self):
         return Operator("round", self, var=self.var, params=self.params)
 
-    def __lt__(self, other):
+    def __lt__(self, other: "Equation"):
         return self.value < other.value
 
-    def __le__(self, other):
+    def __le__(self, other: "Equation"):
         return self.value <= other.value
 
-    def __eq__(self, other):
+    def __eq__(self, other: "Equation"):
         return self.value == other.value
 
-    def __ne__(self, other):
+    def __ne__(self, other: "Equation"):
         return self.value != other.value
 
-    def __ge__(self, other):
+    def __ge__(self, other: "Equation"):
         return self.value >= other.value
 
-    def __gt__(self, other):
+    def __gt__(self, other: "Equation"):
         return self.value > other.value
 
     def __int__(self):
@@ -583,8 +589,8 @@ class Equation:
     def __copy__(self):
         pass
 
-    def __deepcopy__(self, memodict={}):
-        pass
+    def __deepcopy__(self, memodict=None):
+        memodict = memodict if memodict is not None else {}
 
     def __str__(self):
         return self.name
@@ -601,7 +607,7 @@ class Operator(Equation):
         self.func = operators[opstr][FUNC]
 
     @property
-    def value(self) -> Union[float, np.ndarray]:
+    def value(self) -> Union[complex, np.ndarray]:
         return self.func(*[item.value for item in self.nodes], **self.kwargs)
 
     def __str__(self):
@@ -642,7 +648,7 @@ class NodeOperator(Operator):
     """
 
     @property
-    def value(self) -> Union[float, np.ndarray, "Equation"]:
+    def value(self) -> Union[complex, np.ndarray, "Equation"]:
         return self.func(*self.nodes, **self.kwargs)
 
 
@@ -696,7 +702,7 @@ class Variable(Equation):
 
 class Number(Equation):
 
-    def __init__(self, value: float, var: dict = None, params: dict = None):
+    def __init__(self, value: complex, var: dict = None, params: dict = None):
         super().__init__(name=str(value), value=value, var=var, params=params)
         self.is_primitive = True
 
@@ -743,10 +749,7 @@ if __name__ == "__main__":
     # import timeit
     # print(timeit.timeit(calc, number=100))
     parser = EqParser()
-    f = parser.parse("3/x")
-    g = parser.parse("x/3")
-    h = f * g
-    print(h[0:10])
+    f = parser.parse("2*3i")
 
 # TODO: overwrite names after next assignment
 # TODO: write README
