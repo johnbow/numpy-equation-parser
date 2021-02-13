@@ -375,6 +375,7 @@ class Equation:
         self.opstr = ""
         self.is_primitive = False   # True if value accesses own node's memory directly
         self.is_assignable = False  # True if value accesses another node's value
+        self.is_eqref = False       # True if value accesses contained equation as reference
 
     @property
     def value(self) -> Union[float, np.ndarray]:
@@ -453,14 +454,16 @@ class Operator(Equation):
         if len(self.args) == 1:
             return f"{self.opstr}({str(self.args[0])})"
         else:
-            left = str(self.args[0])
-            if type(self.args[0]) == Operator and \
-                    operators[self.args[0].opstr][PREC] < operators[self.opstr][PREC]:
-                left = "(" + left + ")"
-            right = str(self.args[1])
-            if type(self.args[1]) == Operator and \
-                    operators[self.args[1].opstr][PREC] < operators[self.opstr][PREC]:
-                right = "(" + right + ")"
+            left_node = self.args[0] if not self.args[0].is_eqref else self.args[0]._value
+            if isinstance(left_node, Operator) and operators[left_node.opstr][PREC] < operators[self.opstr][PREC]:
+                left = "(" + str(left_node) + ")"
+            else:
+                left = str(left_node)
+            right_node = self.args[1] if not self.args[1].is_eqref else self.args[1]._value
+            if isinstance(right_node, Operator) and operators[right_node.opstr][PREC] < operators[self.opstr][PREC]:
+                right = "(" + str(right_node) + ")"
+            else:
+                right = str(right_node)
             return " ".join((left, self.opstr, right))
 
     def __repr__(self):
@@ -507,6 +510,7 @@ class Variable(Equation):
         super().__init__(name=name, var=var, params=params)
         self.is_assignable = True
         self._value = eqref
+        self.is_eqref = eqref is not None
 
     @property
     def value(self) -> Union[float, np.ndarray]:
@@ -519,9 +523,9 @@ class Variable(Equation):
         self.set_var(self.name, v)
 
     def __str__(self):
-        if self._value is not None:
-            return f"({str(self._value)})"
-        return self.name
+        if self._value is None:
+            return self.name
+        return f"{str(self._value)}"
 
     def __repr__(self):
         return f"Variable(name='{self.name}', value={self.value})"
@@ -578,9 +582,11 @@ if __name__ == "__main__":
     parser = EqParser()
     f = parser.parse("3/x")
     g = parser.parse("4+x")
-    h = parser.parse("f(g)")
-    print(h(5))
+    h = parser.parse("f(3*g)")
+    print(h)
 
+# TODO: correct printing behaviour of compound functions: e.g. f(g) produces unnecessary bracket
+# -> remove parantheses from variable and make Operator responsible for them
 # TODO: write README
 # TODO: write docs
 # TODO: implement magic methods
