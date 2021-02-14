@@ -78,7 +78,7 @@ f()
 >>> 7.3890560989306495
 ```
 By calling the equation object the passed arguments set the variables accordingly. If no name 
-is provided, they are set in alphabetical order.
+is provided they are set in alphabetical order.
 ```python
 f = parser.parse("sqrt(x^2 - y^2)")
 f(5, 4)
