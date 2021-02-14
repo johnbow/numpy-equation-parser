@@ -29,7 +29,7 @@ h(np.pi)
 >>> 4.0
 ```
 
-## Usage
+## Tutorial
 
 ### Parser
 Instantiate the parser directly. All parameters and equations belong to the parser and can 
