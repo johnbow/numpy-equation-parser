@@ -9,6 +9,7 @@ name_count = 0
 name_prefix = "f"
 
 def standard_name():
+    """Returns a generic equation name composed of the name_prefix and name_count."""
     global name_count
     name = name_prefix + str(name_count)
     name_count += 1
@@ -27,16 +28,35 @@ MAX_REPITIONS = 1_000_000
 
 
 def kth_root(k: float, x: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+    """
+    Returns the kth root of x.
+
+    This should be equivalent to x^(1/k). Only works for real k and x.
+    """
     if k % 2 != 0:
         res = np.power(np.abs(x), 1. / k)
         return res * np.sign(x)
     else:
         return np.power(np.abs(x), 1. / k)
 
-def logbase(base: float, x: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+def logbase(base: complex, x: Union[complex, np.ndarray]) -> Union[complex, np.ndarray]:
+    """
+    Returns the logarithm of x to the specified base.
+
+    Expects a non-negative x, else it will return nan. This also works for complex numbers.
+    """
     return np.log(x) / np.log(base)
 
 def sum_function(eqlist: "Vector") -> Any:
+    """
+    Returns the cumulated sum of all Vector elements.
+
+    If an assigned counting variable is the first Vector element,
+    it returns the sum from start to stop of the expression by this syntax:
+
+    sum(var = start; stop; expr) \n-> expr(start) + expr(start+1) + ... + expr(stop)
+
+    """
     if eqlist.is_primitive:
         return np.sum(eqlist.value)
     if eqlist.nodes[0].name != "=":
@@ -58,6 +78,14 @@ def sum_function(eqlist: "Vector") -> Any:
 
 
 def prod_function(eqlist: "Vector") -> Any:
+    """
+        Returns the cumulated product of all Vector elements.
+
+        If an assigned counting variable is the first Vector element,
+        it returns the product from start to stop of the expression by this syntax:
+
+        sum(var = start; stop; expr) \n-> expr(start) * expr(start+1) * ... * expr(stop)
+    """
     if eqlist.is_primitive:
         return np.prod(eqlist.value)
     if eqlist.nodes[0].name != "=":
@@ -79,6 +107,7 @@ def prod_function(eqlist: "Vector") -> Any:
 
 
 def merge_equations(eqs: List["Equation"], var: dict = None, params: dict = None) -> "Vector":
+    """Merges the list of equations and returns the result as a Vector."""
     if all(e.is_primitive for e in eqs):
         return Vector(np.array([e.value for e in eqs]), var=var, params=params)
     else:
@@ -103,6 +132,7 @@ def assign(node1: "Equation", node2: "Equation") -> Optional["Equation"]:
     return left
 
 def call_equation(inner: "Equation", equation: "Equation") -> Union[float, np.ndarray, "Equation"]:
+    """Calls equation and treats inner as the input parameters."""
     variables = []
 
     def set_vars(_inner: "Equation"):
@@ -189,9 +219,7 @@ operators.update(node_operators)
 
 
 def add_operator(opname: str, func: Callable, nodes: int, prec: int = -1, node_operator: bool = False):
-    """
-    Adds 'opname' to the list of operators.
-    """
+    """Adds 'opname' to the list of operators."""
     if opname in operators:
         raise ValueError(f"Operator '{opname}' already exists!")
     elif not opname.isalpha():
@@ -204,6 +232,7 @@ def add_operator(opname: str, func: Callable, nodes: int, prec: int = -1, node_o
 
 
 def _norm_eq(eqstr: str) -> str:
+    """Prepares string input for parsing."""
     eqstr = eqstr.replace(",", ".").replace("_", "")
     i = 0
     while i < len(eqstr) - 1:
@@ -215,6 +244,8 @@ def _norm_eq(eqstr: str) -> str:
 
 
 def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]]:
+    """Creates a list of all operators in eqstr and returns them in the form
+    [(opstr, index, prec), ...]."""
     equations = equations if equations else {}
     precs = []  # (opstr, index, prec)
     level = 0
@@ -249,6 +280,7 @@ def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]
 
 
 def as_equation(value: Union[complex, list, np.ndarray], var: dict = None, params: dict = None) -> "Equation":
+    """Wraps the primitive input into an Equation form."""
     if isinstance(value, (float, int, complex)):
         return Number(value, var=var, params=params)
     elif isinstance(value, np.ndarray):
@@ -282,10 +314,9 @@ class EqParser:
             self.params[name] = as_equation(value, var, self.params)
 
     def parse(self, eqstr: str, name: str = "", var: dict = None) -> "Equation":
+        """Parses the eqstr into an Equation and registers it in the parser."""
         if not name:
             name = varname()
-        while not name or name in self.equations:
-            name = standard_name()
         var = var if var else {}
         eqstr = _norm_eq(eqstr)
         prec_list = _list_precs(eqstr, self.equations)
@@ -376,7 +407,7 @@ class Equation:
         self.kwargs = kwargs
         self.name = name
         self._value = value
-        self.origstr = eqstr
+        self.eqstr = eqstr
         self.var = var
         self.params = params
         self.eqname = ""
@@ -394,21 +425,34 @@ class Equation:
         self._value = v
 
     def change_vars(self, new_vars: dict):
+        """Changes own and children's var dicts to *new_vars*."""
         self.var = new_vars
         for node in self.nodes:
             node.change_vars(new_vars)
 
     def merge_vars(self, other: "Equation"):
+        """Merges var dicts of *self* and *other* Equation."""
         self.var.update(other.var)
         other.change_vars(self.var)
 
     def set_var(self, name: str, value: Union[complex, np.ndarray, "Equation"]) -> None:
+        """
+        Assigns the variable to the specified value.
+
+        If the value is a primitive type (complex, float, int, ndarray), it
+        is being wrapped by an Equation type.
+        """
         if isinstance(value, Equation):
             self.var[name] = value
         else:
             self.var[name] = as_equation(value, self.var, self.params)
 
     def set_vars(self, *args: Union[complex, np.ndarray, "Equation"], **kwargs):
+        """
+        Assigns all *args* and *kwargs* to their specified variables.
+
+        Values inputted under *args* will be assigned alphabetically to their variable counterparts.
+        """
         for k, v in zip(sorted(self.var.keys()), args):
             self.set_var(k, v)
         if kwargs:
@@ -416,6 +460,7 @@ class Equation:
                 self.set_var(k, v)
 
     def __call__(self, *args: Union[complex, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
+        """Assigns *args* and *kwargs* to variables and calculates the equation value."""
         self.set_vars(*args, **kwargs)
         if len(args) == 1 and isinstance(args[0], Equation):
             return self
@@ -587,10 +632,8 @@ class Equation:
         return iter(self.nodes)
 
     def __copy__(self):
-        pass
-
-    def __deepcopy__(self, memodict=None):
-        memodict = memodict if memodict is not None else {}
+        return Equation(*self.nodes, eqstr=self.eqstr, name=self.name, var=self.var,
+                        params=self.params, value=self.value, **self.kwargs)
 
     def __str__(self):
         return self.name
@@ -638,6 +681,9 @@ class Operator(Equation):
     def __repr__(self):
         return f"Operator(opstr='{self.opstr}', func={self.func})"
 
+    def __copy__(self):
+        return Operator(self.opstr, *self.nodes, var=self.var, params=self.params, **self.kwargs)
+
 
 class NodeOperator(Operator):
     """
@@ -654,7 +700,7 @@ class NodeOperator(Operator):
 
 class Parameter(Equation):
 
-    def __init__(self, name, params: dict, var: dict = None):
+    def __init__(self, name: str, params: dict, var: dict = None):
         super().__init__(name=name, var=var, params=params)
         self.is_assignable = True
 
@@ -671,6 +717,9 @@ class Parameter(Equation):
 
     def __repr__(self):
         return f"Operator(name='{self.name}')"
+
+    def __copy__(self):
+        return Parameter(self.name, params=self.params, var=self.var)
 
 
 class Variable(Equation):
@@ -699,6 +748,9 @@ class Variable(Equation):
     def __repr__(self):
         return f"Variable(name='{self.name}', value={self.value})"
 
+    def __copy__(self):
+        return Variable(self.name, var=self.var, params=self.params, eqref=self._value)
+
 
 class Number(Equation):
 
@@ -709,12 +761,15 @@ class Number(Equation):
     def __repr__(self):
         return f"Number(value={self.value})"
 
+    def __copy__(self):
+        return Number(self.value, var=self.var, params=self.params)
+
 
 class Vector(Equation):
 
     def __init__(self,
                  vec_or_item1: Union[np.ndarray, "Equation"],
-                 *nodes: Union[np.ndarray, "Equation"],
+                 *nodes: "Equation",
                  var: dict = None,
                  params: dict = None):
         super().__init__(*nodes, var=var, params=params)
@@ -744,14 +799,20 @@ class Vector(Equation):
     def __repr__(self):
         return f"Vector({'; '.join(map(repr, self.nodes))})"
 
+    def __copy__(self):
+        if self.is_primitive:
+            return Vector(self.vec, var=self.var, params=self.params)
+        else:
+            return Vector(self.nodes[0], *self.nodes[1:], var=self.var, params=self.params)
+
 
 if __name__ == "__main__":
     # import timeit
     # print(timeit.timeit(calc, number=100))
     parser = EqParser()
-    f = parser.parse("2*3i")
+    f = parser.parse("2 log 16")
+    print(f())
 
-# TODO: overwrite names after next assignment
 # TODO: write README
 # TODO: write docs
 # TODO: implement visualizer in other file
