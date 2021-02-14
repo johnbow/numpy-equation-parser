@@ -7,8 +7,8 @@ For using the on-the-fly name parsing feature, you have to install
 the [varname](https://github.com/pwwang/python-varname) module by 
 typing `pip install -U varname`.
 
-## Examples
-Here are an example code snippet that shows the module's functionality.
+## Example
+Here is an example code snippet that shows the module's functionality.
 
 ```java
 parser = eq.EqParser()
