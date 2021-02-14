@@ -804,15 +804,3 @@ class Vector(Equation):
             return Vector(self.vec, var=self.var, params=self.params)
         else:
             return Vector(self.nodes[0], *self.nodes[1:], var=self.var, params=self.params)
-
-
-if __name__ == "__main__":
-    # import timeit
-    # print(timeit.timeit(calc, number=100))
-    parser = EqParser()
-    f = parser.parse("2 log 16")
-    print(f())
-
-# TODO: write README
-# TODO: write docs
-# TODO: implement visualizer in other file
