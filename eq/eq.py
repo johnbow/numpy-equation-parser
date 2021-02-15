@@ -60,7 +60,7 @@ def sum_function(eqlist: "Vector") -> Any:
     if eqlist.is_primitive:
         return np.sum(eqlist.value)
     if eqlist.nodes[0].name != "=":
-        return np.sum(node.value for node in eqlist.nodes)
+        return np.sum([node.value for node in eqlist.nodes])
     if len(eqlist.nodes) != 3:
         raise ValueError(f"sum function expects 3 arguments. {len(eqlist.nodes)} given.")
     values = []
@@ -89,7 +89,7 @@ def prod_function(eqlist: "Vector") -> Any:
     if eqlist.is_primitive:
         return np.prod(eqlist.value)
     if eqlist.nodes[0].name != "=":
-        return np.prod(node.value for node in eqlist.nodes)
+        return np.prod([node.value for node in eqlist.nodes])
     if len(eqlist.nodes) != 3:
         raise ValueError(f"prod function expects 3 arguments. {len(eqlist.nodes)} given.")
     values = []
@@ -316,7 +316,11 @@ class EqParser:
     def parse(self, eqstr: str, name: str = "", var: dict = None) -> "Equation":
         """Parses the eqstr into an Equation and registers it in the parser."""
         if not name:
-            name = varname()
+            from varname import VarnameRetrievingError
+            try:
+                name = varname()
+            except VarnameRetrievingError:
+                name = standard_name()
         var = var if var else {}
         eqstr = _norm_eq(eqstr)
         prec_list = _list_precs(eqstr, self.equations)
