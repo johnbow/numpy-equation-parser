@@ -2,7 +2,7 @@
 Modules to quickly parse and use functions for graphing and computation.
 
 ## Installation
-Just copy the eq module into your project. Then you can import it with `from eq import eq`.
+Just copy the eq module into your project. Then you can import it with `from eq.core import EqParser`.
 For using the on-the-fly name parsing feature, you have to install
 the [varname](https://github.com/pwwang/python-varname) module by 
 typing `pip install -U varname`.
@@ -11,7 +11,7 @@ typing `pip install -U varname`.
 Here is an example code snippet that shows the module's functionality.
 
 ```java
-parser = eq.EqParser()
+parser = EqParser()
 f = parser.parse("3x+4")
 g = parser.parse("sin(t)")
 	
@@ -36,7 +36,7 @@ Instantiate the parser directly. All parameters and equations belong to the pars
 be retrieved by their names with the syntax `parser[name]`. Equations are stored in a tree structure 
 for fast calculation purposes.
 ```python
-from eq import eq
+from eq.core import EqParser
 
 parser = eq.EqParser()
 f = parser.parse("3 root 125")
