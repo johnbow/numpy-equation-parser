@@ -2,7 +2,7 @@
 Modules to quickly parse and use functions for graphing and computation.
 
 ## Installation
-Just copy the eq module into your project. Then you can import it with `from eq import eq`.
+Just copy the eq module into your project. Then you can import it with `from eq.core import EqParser`.
 For using the on-the-fly name parsing feature, you have to install
 the [varname](https://github.com/pwwang/python-varname) module by 
 typing `pip install -U varname`.
@@ -11,7 +11,7 @@ typing `pip install -U varname`.
 Here is an example code snippet that shows the module's functionality.
 
 ```java
-parser = eq.EqParser()
+parser = EqParser()
 f = parser.parse("3x+4")
 g = parser.parse("sin(t)")
 	
@@ -35,14 +35,13 @@ h(np.pi)
 Instantiate the parser directly. All parameters and equations belong to the parser and can 
 be retrieved by their names with the syntax `parser[name]`. Equations are stored in a tree structure 
 for fast calculation purposes.
-
 ```python
-from eq import core
+from eq.core import EqParser
 
-parser = core.EqParser()
+parser = EqParser()
 f = parser.parse("3 root 125")
-parser["f"].value  # equivalent to f.value
->> > 5.0
+parser["f"].value	# equivalent to f.value
+>>> 5.0
 ```
 
 _____________________________
@@ -127,8 +126,8 @@ new_eq
 new_eq.var
 >>> {'x': Number(value=nan), 'y': Number(value=nan)}
 
-f.var, g.var	# vars have been merged
->>> {'x': Number(value=nan), 'y': Number(value=nan)} {'x': Number(value=nan), 'y': Number(value=nan)}
+f.var is g.var is h.var 	# vars have been merged
+>>> True
 ```
 The difference between parsing the equation concatenation or directly concatenating them is that 
 a direct concatenation does not register the new equation in the parser, such that it can not be used 
@@ -143,7 +142,7 @@ operators (+, -, \*, /, :, ^), logic operators, elementary functions, trigonomet
 rounding functions, vector functions and some special ones.
 
 The sum and product functions can either return the product or sum of a vector or can used like the corresponding mathematical 
-symbols with a count variable, a stop value and a function. In order to use it as the last, you have to pass a three element 
+symbols with a count variable, a stop value and a function. In order to use it as the latter one, you have to pass a three element 
 vector to `sum` with an assignment as the first argument.
 vector to `sum` or `prod` with an assignment as the first argument.
 ```python
