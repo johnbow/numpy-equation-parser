@@ -1,3 +1,8 @@
+"""
+Implements the equation parser and the equation classes.
+Provides the standard parser operators.
+"""
+
 import re
 from typing import Union, List, Callable, Tuple, Dict, Optional, Any
 
@@ -17,8 +22,8 @@ def standard_name():
 
 
 try:
-    from varname import varname
-except ImportError:
+    from varname import varname, VarnameRetrievingError
+except (ImportError, VarnameRetrievingError):
     import sys
     print("Install 'varname' for better handling of compound functions.", file=sys.stderr)
     varname = standard_name
@@ -113,6 +118,9 @@ def merge_equations(eqs: List["Equation"], var: dict = None, params: dict = None
     else:
         return Vector(*eqs, var=var, params=params)
 
+def pow10(factor: Union[complex, np.ndarray], exponent: complex):
+    return factor*np.power(10, exponent)
+
 def assign(node1: "Equation", node2: "Equation") -> Optional["Equation"]:
     """
     Assigns one node to the other and returns the node to which the equation or value has been assigned to.
@@ -160,6 +168,7 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
     # parser operators
     "|": (2, 1, merge_equations),
     ";": (2, 1, merge_equations),
+    "E": (2, 700, pow10),
     # logic operators
     "or": (2, 40, np.logical_or),
     "and": (2, 50, np.logical_and),
@@ -176,7 +185,7 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
     "root": (2, 500, kth_root),
     "mod": (2, 500, np.mod),
     "abs": (1, 600, np.abs),
-    "neg": (1, 600, np.negative),
+    "neg": (1, 800, np.negative),
     "sqrt": (1, 600, np.sqrt),
     "exp": (1, 600, np.exp),
     "ln": (1, 600, np.log),
@@ -237,7 +246,7 @@ def _norm_eq(eqstr: str) -> str:
     i = 0
     while i < len(eqstr) - 1:
         this, nxt = eqstr[i:i + 2]
-        if (this.isdigit() and nxt.isalpha()) or (this.isdigit() and nxt == "("):
+        if (this.isdigit() and nxt.isalpha() and nxt != "E") or (this.isdigit() and nxt == "("):
             eqstr = eqstr[:i + 1] + "*" + eqstr[i + 1:]
         i += 1
     return eqstr
@@ -262,15 +271,11 @@ def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]
             opstr += letter
         # if opstr is operator
         if opstr and (not next_letter or not next_letter.isalpha() or not opstr.isalpha()):
-            if opstr not in operators and opstr not in equations:
-                opstr = ""
-                continue
-            elif opstr in equations:
-                if next_letter == "(":
-                    prec = 600 + level * BRACKET_PREC
-                    index = i - len(opstr) + 1
-                    precs.append((opstr, index, prec))
-            else:
+            if opstr in equations and next_letter == "(":
+                prec = 600 + level * BRACKET_PREC
+                index = i - len(opstr) + 1
+                precs.append((opstr, index, prec))  # TODO: make minus to neg where possible
+            elif opstr in operators:
                 oplist = operators[opstr]
                 prec = oplist[PREC] + level * BRACKET_PREC
                 index = i - len(opstr) + 1
@@ -304,6 +309,12 @@ class EqParser:
             "i": Number(np.complex(0, 1))
         }
 
+    def __getitem__(self, item):
+        if item in self.equations:
+            return self.equations[item]
+        else:
+            return self.params[item]
+
     def set_param(self, name: str, value: Union[str, complex, list, np.ndarray, "Equation"], var: dict = None):
         self.params[name] = np.nan
         if isinstance(value, Equation):
@@ -316,7 +327,6 @@ class EqParser:
     def parse(self, eqstr: str, name: str = "", var: dict = None) -> "Equation":
         """Parses the eqstr into an Equation and registers it in the parser."""
         if not name:
-            from varname import VarnameRetrievingError
             try:
                 name = varname()
             except VarnameRetrievingError:
@@ -337,64 +347,89 @@ class EqParser:
                     left: int,
                     right: int,
                     var: dict) -> "Equation":
+        """Parses nodes between left and right recursively and returns them in Equation-Form."""
         # find lowest precedence operator between left and right
         op_list = next(filter(lambda o: left <= o[1] < right, prec_list), None)
         if not op_list:
-            # this is an end node
-            content = re.sub(r"[()\[\] ]", "", eqstr[left:right])
-            if not content:
-                content = "0"
-            if content.replace('.', '', 1).isdigit():
-                return Number(float(content), var=var, params=self.params)
-
-            if content in self.equations:
-                # merge var dicts
-                var.update(self.equations[content].var)
-                self.equations[content].change_vars(var)
-                return Variable(content, var=var, params=self.params, eqref=self.equations[content])
-            elif content in self.params:
-                return Parameter(content, var=var, params=self.params)
-            else:
-                var[content] = Number(np.nan)
-                return Variable(content, var=var, params=self.params)
+            return self.__parse_primitive(eqstr, left, right, var)
         else:
-            # this node is an operator
-            prec_list.remove(op_list)
-            opstr, index, prec = op_list
-            if opstr == ";" or opstr == "|":  # check for Vector operators
-                vector_ops = list(filter(lambda o: left <= o[1] < right and prec == o[2], prec_list))
-                for op in vector_ops:
-                    prec_list.remove(op)
-                vector_ops = [op_list] + vector_ops
-                indices: List[Union[None, int]] = [left-1] + [op[1] for op in reversed(vector_ops)] + [right]
-                vector_items = [self._parse_node(eqstr, prec_list, i+1, j, var)
-                                for i, j in zip(indices, indices[1:])]
-                return merge_equations(vector_items, var=var, params=self.params)
+            return self.__parse_operator(eqstr, prec_list, op_list, left, right, var)
 
-            if opstr in self.equations:
-                right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
-                return NodeOperator("call", right_op, var=var, params=self.params, equation=self.equations[opstr])
+    def __parse_primitive(self, eqstr, left, right, var):
+        content = re.sub(r"[()\[\] ]", "", eqstr[left:right])
+        if not content:
+            content = "0"
+        if content.replace('.', '', 1).isdigit():
+            return Number(float(content), var=var, params=self.params)
 
-            number_of_nodes = operators[opstr][NODES]
-            if number_of_nodes == 1:
-                right_op = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
-                if opstr in node_operators:
-                    return NodeOperator(opstr, right_op, var=var, params=self.params)
-                return Operator(opstr, right_op, var=var, params=self.params)
-            elif number_of_nodes == 2:
-                left_op = self._parse_node(eqstr, prec_list, left, index, var)
-                right_op = self._parse_node(eqstr, prec_list, index+len(opstr), right, var)
-                if opstr in node_operators:
-                    return NodeOperator(opstr, left_op, right_op, var=var, params=self.params)
-                return Operator(opstr, left_op, right_op, var=var, params=self.params)
-            else:
-                raise ValueError("Only operators with 1 or 2 arguments are allowed.")
-
-    def __getitem__(self, item):
-        if item in self.equations:
-            return self.equations[item]
+        if content in self.equations:
+            # merge var dicts
+            var.update(self.equations[content].var)
+            self.equations[content].change_vars(var)
+            return Variable(content, var=var, params=self.params, eqref=self.equations[content])
+        elif content in self.params:
+            return Parameter(content, var=var, params=self.params)
         else:
-            return self.params[item]
+            var[content] = Number(np.nan)
+            return Variable(content, var=var, params=self.params)
+
+    def __parse_operator(self, eqstr, prec_list, op_list, left, right, var):
+        prec_list.remove(op_list)
+        opstr = op_list[0]
+        if opstr == ";" or opstr == "|":
+            return self.__parse_vector_operator(eqstr, prec_list, left, right, op_list, var)
+        elif opstr == "E":
+            return self.__parse_pow10_operator(eqstr, prec_list, left, right, op_list, var)
+        elif opstr in self.equations:
+            return self.__parse_equation_operator(eqstr, prec_list, left, right, op_list, var)
+        else:
+            return self.__parse_standard_operator(eqstr, prec_list, left, right, op_list, var)
+
+    def __parse_equation_operator(self, eqstr, prec_list, left, right, op_list, var):
+        opstr, index, prec = op_list
+        right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
+        return NodeOperator("call", right_op, var=var, params=self.params, equation=self.equations[opstr])
+
+    def __parse_standard_operator(self, eqstr, prec_list, left, right, op_list, var):
+        opstr, index, prec = op_list
+        number_of_nodes = operators[opstr][NODES]
+        if number_of_nodes == 1:
+            right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
+            if opstr in node_operators:
+                return NodeOperator(opstr, right_op, var=var, params=self.params)
+            return Operator(opstr, right_op, var=var, params=self.params)
+        elif number_of_nodes == 2:
+            left_op = self._parse_node(eqstr, prec_list, left, index, var)
+            right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
+            if opstr in node_operators:
+                return NodeOperator(opstr, left_op, right_op, var=var, params=self.params)
+            return Operator(opstr, left_op, right_op, var=var, params=self.params)
+        else:
+            raise ValueError("Only operators with 1 or 2 arguments are allowed.")
+
+    def __parse_vector_operator(self, eqstr, prec_list, left, right, op_list, var):
+        opstr, index, prec = op_list
+        vector_ops = list(filter(lambda o: left <= o[1] < right and prec == o[2], prec_list))
+        for op in vector_ops:
+            prec_list.remove(op)
+        vector_ops = [op_list] + vector_ops
+        indices: List[Union[None, int]] = [left - 1] + [op[1] for op in reversed(vector_ops)] + [right]
+        vector_items = [self._parse_node(eqstr, prec_list, i + 1, j, var)
+                        for i, j in zip(indices, indices[1:])]
+        return merge_equations(vector_items, var=var, params=self.params)
+
+    def __parse_pow10_operator(self, eqstr, prec_list, left, right, op_list, var):
+        # TODO: correct this behaviour
+        opstr, index, prec = op_list
+        minus = next(filter(lambda o: index + 1 == o[1], prec_list), None)
+        if minus:
+            prec_list.remove(minus)
+        factor = -1 if minus and minus[0] == "-" else 1
+        off = int(factor != 1)
+        left_op = self._parse_node(eqstr, prec_list, left, index, var)
+        right_op = self._parse_node(eqstr, prec_list, index + len(opstr) + off, right, var)
+        print(eqstr[left:right])
+        return Number(pow10(left_op.value, factor * right_op.value), var=var, params=self.params)
 
 
 class Equation:
@@ -663,6 +698,11 @@ class Operator(Equation):
             name = name if name else self.opstr
             return f"{name}({str(self.nodes[0])})"
         if len(self.nodes) == 1:
+            if self.opstr == "neg":
+                if self.nodes[0].is_primitive:
+                    return f"-{str(self.nodes[0])}"
+                else:
+                    return f"-({str(self.nodes[0])})"
             return f"{self.opstr}({str(self.nodes[0])})"
         else:
 

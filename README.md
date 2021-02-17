@@ -35,13 +35,14 @@ h(np.pi)
 Instantiate the parser directly. All parameters and equations belong to the parser and can 
 be retrieved by their names with the syntax `parser[name]`. Equations are stored in a tree structure 
 for fast calculation purposes.
-```python
-from eq import eq
 
-parser = eq.EqParser()
+```python
+from eq import core
+
+parser = core.EqParser()
 f = parser.parse("3 root 125")
-parser["f"].value	# equivalent to f.value
->>> 5.0
+parser["f"].value  # equivalent to f.value
+>> > 5.0
 ```
 
 _____________________________
