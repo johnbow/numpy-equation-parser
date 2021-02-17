@@ -126,8 +126,8 @@ new_eq
 new_eq.var
 >>> {'x': Number(value=nan), 'y': Number(value=nan)}
 
-f.var, g.var	# vars have been merged
->>> {'x': Number(value=nan), 'y': Number(value=nan)} {'x': Number(value=nan), 'y': Number(value=nan)}
+f.var is g.var is h.var 	# vars have been merged
+>>> True
 ```
 The difference between parsing the equation concatenation or directly concatenating them is that 
 a direct concatenation does not register the new equation in the parser, such that it can not be used 
