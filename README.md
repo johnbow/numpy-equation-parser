@@ -142,7 +142,7 @@ operators (+, -, \*, /, :, ^), logic operators, elementary functions, trigonomet
 rounding functions, vector functions and some special ones.
 
 The sum and product functions can either return the product or sum of a vector or can used like the corresponding mathematical 
-symbols with a count variable, a stop value and a function. In order to use it as the last, you have to pass a three element 
+symbols with a count variable, a stop value and a function. In order to use it as the latter one, you have to pass a three element 
 vector to `sum` with an assignment as the first argument.
 vector to `sum` or `prod` with an assignment as the first argument.
 ```python
