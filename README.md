@@ -38,7 +38,7 @@ for fast calculation purposes.
 ```python
 from eq.core import EqParser
 
-parser = eq.EqParser()
+parser = EqParser()
 f = parser.parse("3 root 125")
 parser["f"].value	# equivalent to f.value
 >>> 5.0
