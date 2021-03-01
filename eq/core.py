@@ -1,32 +1,13 @@
 """
-Implements the equation parser and the equation classes.
-Provides the standard parser operators.
+Implements classes to store Expressions and evaluate them.
+Relies entirely on the standard library.
 """
 
-import re
 from typing import Union, List, Callable, Tuple, Dict, Optional, Any
 
 import numpy as np
 
 np.seterr(all="ignore")
-
-name_count = 0
-name_prefix = "f"
-
-def standard_name():
-    """Returns a generic equation name composed of the name_prefix and name_count."""
-    global name_count
-    name = name_prefix + str(name_count)
-    name_count += 1
-    return name
-
-
-try:
-    from varname import varname, VarnameRetrievingError
-except (ImportError, VarnameRetrievingError):
-    import sys
-    print("Install 'varname' for better handling of compound functions.", file=sys.stderr)
-    varname = standard_name
 
 
 MAX_REPITIONS = 1_000_000
@@ -111,8 +92,8 @@ def prod_function(eqlist: "Vector") -> Any:
     return np.prod(values, axis=0)
 
 
-def merge_equations(eqs: List["Equation"], var: dict = None, params: dict = None) -> "Vector":
-    """Merges the list of equations and returns the result as a Vector."""
+def merge_expressions(eqs: List["Expression"], var: dict = None, params: dict = None) -> "Vector":
+    """Merges the list of expressions and returns the result as a Vector."""
     if all(e.is_primitive for e in eqs):
         return Vector(np.array([e.value for e in eqs]), var=var, params=params)
     else:
@@ -121,9 +102,9 @@ def merge_equations(eqs: List["Equation"], var: dict = None, params: dict = None
 def pow10(factor: Union[complex, np.ndarray], exponent: complex):
     return factor*np.power(10, exponent)
 
-def assign(node1: "Equation", node2: "Equation") -> Optional["Equation"]:
+def assign(node1: "Expression", node2: "Expression") -> Optional["Expression"]:
     """
-    Assigns one node to the other and returns the node to which the equation or value has been assigned to.
+    Assigns one node to the other and returns the node to which the expression or value has been assigned to.
 
     If there is no node which can be assigned to, the function returns None.
     If both nodes are variables or parameters, the right node will be assigned to the left.
@@ -139,35 +120,36 @@ def assign(node1: "Equation", node2: "Equation") -> Optional["Equation"]:
     left.value = right.value
     return left
 
-def call_equation(inner: "Equation", equation: "Equation") -> Union[float, np.ndarray, "Equation"]:
-    """Calls equation and treats inner as the input parameters."""
+def call_expression(inner: "Expression", expression: "Expression") -> Union[float, np.ndarray, "Expression"]:
+    """Calls expression and treats inner as the input parameters."""
     variables = []
 
-    def set_vars(_inner: "Equation"):
+    def set_vars(_inner: "Expression"):
         inner_value = _inner.value
         if isinstance(inner_value, Variable):
-            equation.set_var(inner_value.name, inner_value.value)
+            expression.set_var(inner_value.name, inner_value.value)
         elif isinstance(_inner, Vector) and not _inner.is_primitive:
             for node in _inner.nodes:
                 set_vars(node)
         else:
             variables.append(inner)
 
-    if isinstance(inner, Equation):
+    if isinstance(inner, Expression):
         set_vars(inner)
     else:
         variables.append(inner)
-    equation.set_vars(*variables)
-    return equation.value
+    expression.set_vars(*variables)
+    return expression.value
 
 
-NODES, PREC, FUNC = 0, 1, 2
+ARITY, PREC, FUNC = 0, 1, 2
 BRACKET_PREC = 1000
-# abbrev, args, prec, func
+# abbrev, arity, prec, func
+# arity means how many operands the operator takes
 operators: Dict[str, Tuple[int, int, Callable]] = {
     # parser operators
-    "|": (2, 1, merge_equations),
-    ";": (2, 1, merge_equations),
+    "|": (2, 1, merge_expressions),
+    ";": (2, 1, merge_expressions),
     "E": (2, 700, pow10),
     # logic operators
     "or": (2, 40, np.logical_or),
@@ -185,7 +167,7 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
     "root": (2, 500, kth_root),
     "mod": (2, 500, np.mod),
     "abs": (1, 600, np.abs),
-    "neg": (1, 800, np.negative),
+    "neg": (1, 350, np.negative),
     "sqrt": (1, 600, np.sqrt),
     "exp": (1, 600, np.exp),
     "ln": (1, 600, np.log),
@@ -220,7 +202,7 @@ operators: Dict[str, Tuple[int, int, Callable]] = {
 
 node_operators: Dict[str, Tuple[int, int, Callable]] = {
     "=": (2, 2, assign),
-    "call": (1, 600, call_equation),
+    "call": (1, 600, call_expression),
     "sum": (1, 600, sum_function),
     "prod": (1, 600, prod_function),
 }
@@ -240,52 +222,8 @@ def add_operator(opname: str, func: Callable, nodes: int, prec: int = -1, node_o
         node_operators[opname] = (nodes, prec, func)
 
 
-def _norm_eq(eqstr: str) -> str:
-    """Prepares string input for parsing."""
-    eqstr = eqstr.replace(",", ".").replace("_", "")
-    i = 0
-    while i < len(eqstr) - 1:
-        this, nxt = eqstr[i:i + 2]
-        if (this.isdigit() and nxt.isalpha() and nxt != "E") or (this.isdigit() and nxt == "("):
-            eqstr = eqstr[:i + 1] + "*" + eqstr[i + 1:]
-        i += 1
-    return eqstr
-
-
-def _list_precs(eqstr: str, equations: dict = None) -> List[Tuple[str, int, int]]:
-    """Creates a list of all operators in eqstr and returns them in the form
-    [(opstr, index, prec), ...]."""
-    equations = equations if equations else {}
-    precs = []  # (opstr, index, prec)
-    level = 0
-    opstr = ""  # can also be variable or parameter
-    for i, letter in enumerate(eqstr):
-        next_letter = eqstr[i + 1] if i + 1 < len(eqstr) else ""
-        if letter == "(" or letter == "[":
-            level += 1
-        elif letter == ")" or letter == "]":
-            level -= 1
-        elif letter.isalpha():
-            opstr += letter
-        elif not letter.isdigit():  # letter is prob +-/*:
-            opstr += letter
-        # if opstr is operator
-        if opstr and (not next_letter or not next_letter.isalpha() or not opstr.isalpha()):
-            if opstr in equations and next_letter == "(":
-                prec = 600 + level * BRACKET_PREC
-                index = i - len(opstr) + 1
-                precs.append((opstr, index, prec))  # TODO: make minus to neg where possible
-            elif opstr in operators:
-                oplist = operators[opstr]
-                prec = oplist[PREC] + level * BRACKET_PREC
-                index = i - len(opstr) + 1
-                precs.append((opstr, index, prec))
-            opstr = ""
-    return precs
-
-
-def as_equation(value: Union[complex, list, np.ndarray], var: dict = None, params: dict = None) -> "Equation":
-    """Wraps the primitive input into an Equation form."""
+def as_expression(value: Union[complex, list, np.ndarray], var: dict = None, params: dict = None) -> "Expression":
+    """Wraps the primitive input into an Expression form."""
     if isinstance(value, (float, int, complex)):
         return Number(value, var=var, params=params)
     elif isinstance(value, np.ndarray):
@@ -295,147 +233,10 @@ def as_equation(value: Union[complex, list, np.ndarray], var: dict = None, param
     raise ValueError(f"Type {str(type(value))} can not be converted to an equation.")
 
 
-class EqParser:
-    standard_options = {}
-
-    def __init__(self, options: dict = None):
-        self.options = options if options else {}
-        self.options = dict(EqParser.standard_options, **self.options)
-        self.equations = {}
-        self.params: Dict[str, "Equation"] = {
-            "e": Number(np.e),
-            "pi": Number(np.pi),
-            "inf": Number(np.inf),
-            "i": Number(np.complex(0, 1))
-        }
-
-    def __getitem__(self, item):
-        if item in self.equations:
-            return self.equations[item]
-        else:
-            return self.params[item]
-
-    def set_param(self, name: str, value: Union[str, complex, list, np.ndarray, "Equation"], var: dict = None):
-        self.params[name] = np.nan
-        if isinstance(value, Equation):
-            self.params[name] = value
-        elif isinstance(value, str):
-            return self.parse(value, name, var=var)
-        else:
-            self.params[name] = as_equation(value, var, self.params)
-
-    def parse(self, eqstr: str, name: str = "", var: dict = None) -> "Equation":
-        """Parses the eqstr into an Equation and registers it in the parser."""
-        if not name:
-            try:
-                name = varname()
-            except VarnameRetrievingError:
-                name = standard_name()
-        var = var if var else {}
-        eqstr = _norm_eq(eqstr)
-        prec_list = _list_precs(eqstr, self.equations)
-        # sort after precedence, then index
-        prec_list.sort(key=lambda item: (item[2], -item[1]))
-        root = self._parse_node(eqstr, prec_list, 0, len(eqstr), var)
-        root.eqname = name
-        self.equations[name] = root
-        return root
-
-    def _parse_node(self,
-                    eqstr: str,
-                    prec_list: List[Tuple[str, int, int]],
-                    left: int,
-                    right: int,
-                    var: dict) -> "Equation":
-        """Parses nodes between left and right recursively and returns them in Equation-Form."""
-        # find lowest precedence operator between left and right
-        op_list = next(filter(lambda o: left <= o[1] < right, prec_list), None)
-        if not op_list:
-            return self.__parse_primitive(eqstr, left, right, var)
-        else:
-            return self.__parse_operator(eqstr, prec_list, op_list, left, right, var)
-
-    def __parse_primitive(self, eqstr, left, right, var):
-        content = re.sub(r"[()\[\] ]", "", eqstr[left:right])
-        if not content:
-            content = "0"
-        if content.replace('.', '', 1).isdigit():
-            return Number(float(content), var=var, params=self.params)
-
-        if content in self.equations:
-            # merge var dicts
-            var.update(self.equations[content].var)
-            self.equations[content].change_vars(var)
-            return Variable(content, var=var, params=self.params, eqref=self.equations[content])
-        elif content in self.params:
-            return Parameter(content, var=var, params=self.params)
-        else:
-            var[content] = Number(np.nan)
-            return Variable(content, var=var, params=self.params)
-
-    def __parse_operator(self, eqstr, prec_list, op_list, left, right, var):
-        prec_list.remove(op_list)
-        opstr = op_list[0]
-        if opstr == ";" or opstr == "|":
-            return self.__parse_vector_operator(eqstr, prec_list, left, right, op_list, var)
-        elif opstr == "E":
-            return self.__parse_pow10_operator(eqstr, prec_list, left, right, op_list, var)
-        elif opstr in self.equations:
-            return self.__parse_equation_operator(eqstr, prec_list, left, right, op_list, var)
-        else:
-            return self.__parse_standard_operator(eqstr, prec_list, left, right, op_list, var)
-
-    def __parse_equation_operator(self, eqstr, prec_list, left, right, op_list, var):
-        opstr, index, prec = op_list
-        right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
-        return NodeOperator("call", right_op, var=var, params=self.params, equation=self.equations[opstr])
-
-    def __parse_standard_operator(self, eqstr, prec_list, left, right, op_list, var):
-        opstr, index, prec = op_list
-        number_of_nodes = operators[opstr][NODES]
-        if number_of_nodes == 1:
-            right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
-            if opstr in node_operators:
-                return NodeOperator(opstr, right_op, var=var, params=self.params)
-            return Operator(opstr, right_op, var=var, params=self.params)
-        elif number_of_nodes == 2:
-            left_op = self._parse_node(eqstr, prec_list, left, index, var)
-            right_op = self._parse_node(eqstr, prec_list, index + len(opstr), right, var)
-            if opstr in node_operators:
-                return NodeOperator(opstr, left_op, right_op, var=var, params=self.params)
-            return Operator(opstr, left_op, right_op, var=var, params=self.params)
-        else:
-            raise ValueError("Only operators with 1 or 2 arguments are allowed.")
-
-    def __parse_vector_operator(self, eqstr, prec_list, left, right, op_list, var):
-        opstr, index, prec = op_list
-        vector_ops = list(filter(lambda o: left <= o[1] < right and prec == o[2], prec_list))
-        for op in vector_ops:
-            prec_list.remove(op)
-        vector_ops = [op_list] + vector_ops
-        indices: List[Union[None, int]] = [left - 1] + [op[1] for op in reversed(vector_ops)] + [right]
-        vector_items = [self._parse_node(eqstr, prec_list, i + 1, j, var)
-                        for i, j in zip(indices, indices[1:])]
-        return merge_equations(vector_items, var=var, params=self.params)
-
-    def __parse_pow10_operator(self, eqstr, prec_list, left, right, op_list, var):
-        # TODO: correct this behaviour
-        opstr, index, prec = op_list
-        minus = next(filter(lambda o: index + 1 == o[1], prec_list), None)
-        if minus:
-            prec_list.remove(minus)
-        factor = -1 if minus and minus[0] == "-" else 1
-        off = int(factor != 1)
-        left_op = self._parse_node(eqstr, prec_list, left, index, var)
-        right_op = self._parse_node(eqstr, prec_list, index + len(opstr) + off, right, var)
-        print(eqstr[left:right])
-        return Number(pow10(left_op.value, factor * right_op.value), var=var, params=self.params)
-
-
-class Equation:
+class Expression:
 
     def __init__(self,
-                 *nodes: "Equation",
+                 *nodes: "Expression",
                  eqstr: str = "",
                  name: str = "",
                  var: dict = None,
@@ -453,7 +254,7 @@ class Equation:
         self.opstr = ""
         self.is_primitive = False   # True if value accesses own node's memory directly
         self.is_assignable = False  # True if value accesses another node's value
-        self.is_eqref = False       # True if value accesses contained equation as reference
+        self.is_eref = False        # True if value accesses contained expression as reference
 
     @property
     def value(self) -> Union[complex, np.ndarray]:
@@ -469,24 +270,24 @@ class Equation:
         for node in self.nodes:
             node.change_vars(new_vars)
 
-    def merge_vars(self, other: "Equation"):
-        """Merges var dicts of *self* and *other* Equation."""
+    def merge_vars(self, other: "Expression"):
+        """Merges var dicts of *self* and *other* Expression."""
         self.var.update(other.var)
         other.change_vars(self.var)
 
-    def set_var(self, name: str, value: Union[complex, np.ndarray, "Equation"]) -> None:
+    def set_var(self, name: str, value: Union[complex, np.ndarray, "Expression"]) -> None:
         """
         Assigns the variable to the specified value.
 
         If the value is a primitive type (complex, float, int, ndarray), it
-        is being wrapped by an Equation type.
+        is being wrapped by an Expression type.
         """
-        if isinstance(value, Equation):
+        if isinstance(value, Expression):
             self.var[name] = value
         else:
-            self.var[name] = as_equation(value, self.var, self.params)
+            self.var[name] = as_expression(value, self.var, self.params)
 
-    def set_vars(self, *args: Union[complex, np.ndarray, "Equation"], **kwargs):
+    def set_vars(self, *args: Union[complex, np.ndarray, "Expression"], **kwargs):
         """
         Assigns all *args* and *kwargs* to their specified variables.
 
@@ -498,10 +299,11 @@ class Equation:
             for k, v in kwargs.items():
                 self.set_var(k, v)
 
-    def __call__(self, *args: Union[complex, np.ndarray, "Equation"], **kwargs) -> Union[float, np.ndarray, "Equation"]:
-        """Assigns *args* and *kwargs* to variables and calculates the equation value."""
+    def __call__(self, *args: Union[complex, np.ndarray, "Expression"], **kwargs)\
+            -> Union[float, np.ndarray, "Expression"]:
+        """Assigns *args* and *kwargs* to variables and calculates the expression value."""
         self.set_vars(*args, **kwargs)
-        if len(args) == 1 and isinstance(args[0], Equation):
+        if len(args) == 1 and isinstance(args[0], Expression):
             return self
         return self.value
 
@@ -512,7 +314,7 @@ class Equation:
         The input can be either a slice or a tuple of values. If it is a slice,
         the array will be made using np.arange, if it is a list of values, the values
         are going to be wrapped into an array. Consider that this works only for
-        equations with one variables. For more variables, each array should be passed
+        expressions with one variables. For more variables, each array should be passed
         to __call__.
         """
         if isinstance(item, tuple):
@@ -572,44 +374,44 @@ class Equation:
         self.value >>= other
         return self
 
-    def __add__(self, other: "Equation"):
+    def __add__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("+", self, other, var=self.var, params=self.params)
 
-    def __sub__(self, other: "Equation"):
+    def __sub__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("-", self, other, var=self.var, params=self.params)
 
-    def __mul__(self, other: "Equation"):
+    def __mul__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("*", self, other, var=self.var, params=self.params)
 
-    def __truediv__(self, other: "Equation"):
+    def __truediv__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("/", self, other, var=self.var, params=self.params)
 
-    def __floordiv__(self, other: "Equation"):
+    def __floordiv__(self, other: "Expression"):
         self.merge_vars(other)
         op = Operator("/", self, other, var=self.var, params=self.params)
         return Operator("floor", op, var=self.var, params=self.params)
 
-    def __mod__(self, other: "Equation"):
+    def __mod__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("mod", self, other, var=self.var, params=self.params)
 
-    def __pow__(self, power: "Equation", modulo=None):
+    def __pow__(self, power: "Expression", modulo=None):
         self.merge_vars(power)
         return Operator("^", self, power, var=self.var, params=self.params)
 
-    def __or__(self, other: "Equation"):
+    def __or__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("or", self, other, var=self.var, params=self.params)
 
-    def __xor__(self, other: "Equation"):
+    def __xor__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("xor", self, other, var=self.var, params=self.params)
 
-    def __and__(self, other: "Equation"):
+    def __and__(self, other: "Expression"):
         self.merge_vars(other)
         return Operator("and", self, other, var=self.var, params=self.params)
 
@@ -637,22 +439,22 @@ class Equation:
     def __round__(self):
         return Operator("round", self, var=self.var, params=self.params)
 
-    def __lt__(self, other: "Equation"):
+    def __lt__(self, other: "Expression"):
         return self.value < other.value
 
-    def __le__(self, other: "Equation"):
+    def __le__(self, other: "Expression"):
         return self.value <= other.value
 
-    def __eq__(self, other: "Equation"):
+    def __eq__(self, other: "Expression"):
         return self.value == other.value
 
-    def __ne__(self, other: "Equation"):
+    def __ne__(self, other: "Expression"):
         return self.value != other.value
 
-    def __ge__(self, other: "Equation"):
+    def __ge__(self, other: "Expression"):
         return self.value >= other.value
 
-    def __gt__(self, other: "Equation"):
+    def __gt__(self, other: "Expression"):
         return self.value > other.value
 
     def __int__(self):
@@ -671,17 +473,17 @@ class Equation:
         return iter(self.nodes)
 
     def __copy__(self):
-        return Equation(*self.nodes, eqstr=self.eqstr, name=self.name, var=self.var,
-                        params=self.params, value=self.value, **self.kwargs)
+        return Expression(*self.nodes, eqstr=self.eqstr, name=self.name, var=self.var,
+                          params=self.params, value=self.value, **self.kwargs)
 
     def __str__(self):
         return self.name
 
     def __repr__(self):
-        return f"Equation(name={self.name}, vars={str(self.var)}, params={str(self.params)})"
+        return f"Expression(name={self.name}, vars={str(self.var)}, params={str(self.params)})"
 
 
-class Operator(Equation):
+class Operator(Expression):
 
     def __init__(self, opstr: str, *nodes, var: dict = None, params: dict = None, **kwargs):
         super().__init__(*nodes, name=opstr, var=var, params=params, **kwargs)
@@ -694,7 +496,7 @@ class Operator(Equation):
 
     def __str__(self):
         if self.opstr == "call":
-            name = self.kwargs['equation'].eqname
+            name = self.kwargs['expression'].eqname
             name = name if name else self.opstr
             return f"{name}({str(self.nodes[0])})"
         if len(self.nodes) == 1:
@@ -706,7 +508,7 @@ class Operator(Equation):
             return f"{self.opstr}({str(self.nodes[0])})"
         else:
 
-            left_node = self.nodes[0] if not self.nodes[0].is_eqref else self.nodes[0]._value
+            left_node = self.nodes[0] if not self.nodes[0].is_eref else self.nodes[0]._value
             if self.opstr == "-" and isinstance(left_node, Number) and left_node.value == 0:
                 left = ""   # unary operator: 0-x -> -x
             elif isinstance(left_node, Operator) and operators[left_node.opstr][PREC] < operators[self.opstr][PREC]:
@@ -714,7 +516,7 @@ class Operator(Equation):
             else:
                 left = str(left_node)
 
-            right_node = self.nodes[1] if not self.nodes[1].is_eqref else self.nodes[1]._value
+            right_node = self.nodes[1] if not self.nodes[1].is_eref else self.nodes[1]._value
             if isinstance(right_node, Operator) and operators[right_node.opstr][PREC] < operators[self.opstr][PREC]:
                 right = "(" + str(right_node) + ")"
             else:
@@ -738,11 +540,11 @@ class NodeOperator(Operator):
     """
 
     @property
-    def value(self) -> Union[complex, np.ndarray, "Equation"]:
+    def value(self) -> Union[complex, np.ndarray, "Expression"]:
         return self.func(*self.nodes, **self.kwargs)
 
 
-class Parameter(Equation):
+class Parameter(Expression):
 
     def __init__(self, name: str, params: dict, var: dict = None):
         super().__init__(name=name, var=var, params=params)
@@ -766,9 +568,9 @@ class Parameter(Equation):
         return Parameter(self.name, params=self.params, var=self.var)
 
 
-class Variable(Equation):
+class Variable(Expression):
 
-    def __init__(self, name: str, var: dict, params: dict = None, eqref: "Equation" = None):
+    def __init__(self, name: str, var: dict, params: dict = None, eqref: "Expression" = None):
         super().__init__(name=name, var=var, params=params)
         self.is_assignable = True
         self._value = eqref
@@ -781,7 +583,7 @@ class Variable(Equation):
         return self._value.value
 
     @value.setter
-    def value(self, v: Union[float, np.ndarray, "Equation"]):
+    def value(self, v: Union[float, np.ndarray, "Expression"]):
         self.set_var(self.name, v)
 
     def __str__(self):
@@ -796,7 +598,7 @@ class Variable(Equation):
         return Variable(self.name, var=self.var, params=self.params, eqref=self._value)
 
 
-class Number(Equation):
+class Number(Expression):
 
     def __init__(self, value: complex, var: dict = None, params: dict = None):
         super().__init__(name=str(value), value=value, var=var, params=params)
@@ -809,11 +611,11 @@ class Number(Equation):
         return Number(self.value, var=self.var, params=self.params)
 
 
-class Vector(Equation):
+class Vector(Expression):
 
     def __init__(self,
-                 vec_or_item1: Union[np.ndarray, "Equation"],
-                 *nodes: "Equation",
+                 vec_or_item1: Union[np.ndarray, "Expression"],
+                 *nodes: "Expression",
                  var: dict = None,
                  params: dict = None):
         super().__init__(*nodes, var=var, params=params)
