@@ -237,7 +237,6 @@ class EqParser:
                     right: int,
                     var: dict) -> "Expression":
         """Parses nodes between left and right recursively and returns them in Expression-Form."""
-        # TODO: fix this method
         # find lowest precedence operator between left and right
         i = next(filter(lambda o: left <= o < right, prec_list), -1)
         if i < 0:
@@ -297,7 +296,6 @@ class EqParser:
             raise ParserError(f"Operators can only have 1 or 2 arguments. Given: {number_of_nodes}")
 
     def _parse_vector_operator(self, i, flags, prec_list, left, right, var):
-        # TODO: correct this recursion behaviour
         vector_items = []
         common_level = flags[i].level
         index = left
