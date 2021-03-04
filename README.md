@@ -2,7 +2,7 @@
 Modules to quickly parse and use functions for graphing and computation.
 
 ## Installation
-Just copy the eq module into your project. Then you can import it with `from eq.core import EqParser`.
+Just copy the eq module into your project. Then you can import it with `from eq.parsing import EqParser`.
 For using the on-the-fly name parsing feature, you have to install
 the [varname](https://github.com/pwwang/python-varname) module by 
 typing `pip install -U varname`.
@@ -32,11 +32,11 @@ h(np.pi)
 ## Tutorial
 
 ### Parser
-Instantiate the parser directly. All parameters and equations belong to the parser and can 
+Instantiate the parser directly. All parameters and expressions belong to the parser and can 
 be retrieved by their names with the syntax `parser[name]`. Equations are stored in a tree structure 
 for fast calculation purposes.
 ```python
-from eq.core import EqParser
+from eq.parsing import EqParser
 
 parser = EqParser()
 f = parser.parse("3 root 125")
@@ -47,7 +47,7 @@ parser["f"].value	# equivalent to f.value
 _____________________________
 
 ### Variables and Parameters
-Parameters are shared between all equations instantiated by the same parser and are
+Parameters are shared between all expressions instantiated by the same parser and are
 declared by the same. Following parameters can be used without the need of declaration: `e, pi, inf, i`.
 ```python
 A = np.arange(6).reshape(2, 3)
@@ -62,8 +62,8 @@ type(pi_param)
 >>> <class 'eq.Parameter'>
 ```
 
-Variables are unique to every equation, therefore equations can declare independent variables 
-that have the same name as other variables in other equations. By default, undefinded strings 
+Variables are unique to every expression, therefore expressions can declare independent variables 
+that have the same name as other variables in other expressions. By default, undefinded strings 
 are parsed to variables instead of parameters.
 ```python
 f = parser.parse("e^x")
@@ -77,7 +77,7 @@ f.var
 f()
 >>> 7.3890560989306495
 ```
-By calling the equation object the passed arguments set the variables accordingly. If no name 
+By calling the expression object the passed arguments set the variables accordingly. If no name 
 is provided they are set in alphabetical order.
 ```python
 f = parser.parse("sqrt(x^2 - y^2)")
@@ -93,9 +93,8 @@ ____________________________________
 
 ### Vectors
 To declare a vector, just type a semicolon ; or a vertical bar |. This will separate 
-the equation parts from the nearest left bracket to the right. Vectors can consist of 
-only numbers or all equation types. Filling a vector only with numbers speeds up calculations 
-considerably.
+the expression parts from the nearest left bracket to the right. Vectors can consist of 
+any expression types. Filling a vector only with numbers speeds up calculations considerably.
 ```python
 a = parser.parse("(1| 2| 3)")         # fast Vector
 b = parser.parse("[x; y; 3*z]")	      # square brackets can be used interchangeably
@@ -118,8 +117,8 @@ g = parser.parse("y")
 f.var, g.var
 >>> {'x': Number(value=nan)} {'y': Number(value=nan)}
 
-new_eq = parser.parse("f+g")
-new_eq = f + g		# nearly equivalent to above
+new_eq = parser.parse("f+g")	# does not merge vars
+new_eq = f + g			# merges vars of f and g
 new_eq
 >>> x ^ 2.0 + y
 
@@ -142,7 +141,8 @@ operators (+, -, \*, /, :, ^), logic operators, elementary functions, trigonomet
 rounding functions, vector functions and some special ones.
 
 The sum and product functions can either return the product or sum of a vector or can used like the corresponding mathematical 
-symbols with a count variable, a stop value and a function. In order to use it as the latter one, you have to pass a three element vector to `sum` or `prod` with an assignment as the first argument.
+symbols with a count variable, a stop value and a function. In order to use it as the latter one, you have to pass a three element 
+vector to `sum` or `prod` with an assignment as the first argument.
 ```python
 # sum of a vector
 vector_sum = parser.parse("sum(1; 2; 4; 8; 16; 32)")
